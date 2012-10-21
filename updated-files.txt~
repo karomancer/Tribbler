@@ -1,0 +1,19 @@
+The following files have been updated subsequent to the
+initial release of the project on 10/9/2012:
+
+10/17:
+ - binaries (libclient, storageserver):  Leasing is now supported.
+ - writeup.pdf:  Due dates
+ - moved starter stubs to correct contrib directory
+
+10/19:
+ - updated readme
+ - removed storageclient binaries and src: libclient is better supported
+ - removed unnecessary pkgs
+ - updated unofficial testme code
+ - added storageimpl imports
+ - changed official code to import contrib impls
+ - removed unnecessary RevokeLease from storagerpc
+
+10/20: (in progress)
+ - binaries (storageserver): bugfix RemoveFromList properly returns EITEMNOTFOUND
