@@ -2,16 +2,18 @@ package tribimpl
 
 import (
 	"P2-f12/official/tribproto"
+	"P2-f12/contrib/libstore"
 )
 
 type Tribserver struct {
 	storagemaster string
 	hostport string
-	libstore *Libstore
+	lstore *libstore.Libstore
 }
 
 func NewTribserver(storagemaster string, myhostport string) *Tribserver {
-	libstore := libstore.NewLibstore(storagemaster, myhostport, 0)
+	lstore, _ := libstore.NewLibstore(storagemaster, myhostport, 0)
+	return &Tribserver{storagemaster: storagemaster, hostport: myhostport, lstore: lstore}
 
 	//pass storagemaster and hostport to new libstore with flags for debugging
 	//make new libstore
@@ -22,7 +24,6 @@ func NewTribserver(storagemaster string, myhostport string) *Tribserver {
 
 	//return the thing
 
-	return &Tribserver{storagemaster: storagemaster, hostpost: myhostport, libstore: libstore}
 }
 
 func (ts *Tribserver) CreateUser(args *tribproto.CreateUserArgs, reply *tribproto.CreateUserReply) error {
@@ -46,22 +47,38 @@ func (ts *Tribserver) CreateUser(args *tribproto.CreateUserArgs, reply *tribprot
 }
 
 func (ts *Tribserver) AddSubscription(args *tribproto.SubscriptionArgs, reply *tribproto.SubscriptionReply) error {
+	userId := args.Userid
+	targetId := args.Targetuser
 
 	//check errors for any calls to libstore
+	userExists, userErr := ts.lstore.Get(userId)
+	targetExists, targetErr := ts.lstore.Get(targetId)
+
+	if userErr != nil { return userErr }
+	if targetErr != nil { return targetErr }
 
 	//check if subscriber exists
-	//then reply = NOSUCHUSER
+	//if not, then reply = NOSUCHUSER
 	//return nil
-
-	//check if user you are subscribing to
+	if userExists != "1" {
+		reply.Status = tribproto.ENOSUCHUSER
+		return nil
+	}
+	
+	//if user subscribing to does not exist,
 	//then reply = NOSUCHTARGETUSER
 	//return nil
+	if targetExists != "1" {
+		reply.Status = tribproto.ENOSUCHTARGETUSER
+		return nil
+	}
 
-	//so if both exist
-	//then do append to List (user:subscription, target)
+	//if both exist
+	//then do append to List (user:subscriptions, target)
 	//then reply = OK
 	//return nil
-
+	ts.lstore.AppendToList(userId + ":subscriptions", targetId)
+	reply.Status = tribproto.OK
 	return nil
 }
 
