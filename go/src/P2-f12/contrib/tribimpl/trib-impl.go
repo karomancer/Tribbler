@@ -2,16 +2,17 @@ package tribimpl
 
 import (
 	"P2-f12/official/tribproto"
+	"P2-f12/contrib/libstore"
 )
 
 type Tribserver struct {
 	storagemaster string
 	hostport string
-	libstore *Libstore
+	lstore *libstore.Libstore
 }
 
 func NewTribserver(storagemaster string, myhostport string) *Tribserver {
-	libstore := libstore.NewLibstore(storagemaster, myhostport, 0)
+	lstore, _ := libstore.NewLibstore(storagemaster, myhostport, 0)
 
 	//pass storagemaster and hostport to new libstore with flags for debugging
 	//make new libstore
@@ -22,7 +23,7 @@ func NewTribserver(storagemaster string, myhostport string) *Tribserver {
 
 	//return the thing
 
-	return &Tribserver{storagemaster: storagemaster, hostpost: myhostport, libstore: libstore}
+	return &Tribserver{storagemaster: storagemaster, hostport: myhostport, lstore: lstore}
 }
 
 func (ts *Tribserver) CreateUser(args *tribproto.CreateUserArgs, reply *tribproto.CreateUserReply) error {
@@ -32,15 +33,28 @@ func (ts *Tribserver) CreateUser(args *tribproto.CreateUserArgs, reply *tribprot
 	//check errors for any calls to libstore
 
 	//call libstore.get on the user
-	//if it finds it
-	//then it already exists and we can't create 
-	//set reply to EEXISTS
-	//return nil
+	result, err0 := ts.lstore.Get(args.Userid)
 
+	if (err0 != nil) {
+		return err0
+	}
+	//if we find it
+	if (result == "1") {
+		//then it already exists and we can't create 
+		//set reply to EEXISTS
+		reply.Status = tribproto.EEXISTS
+		//return nil
+		return nil
+	}
 	//if we don't find it
 	//we create it with a PUT(user, 1)
-	//then set reply to OK
+	err1 := ts.lstore.Put(args.Userid, "1")
 
+	if (err1 != nil) {
+		return err1
+	}
+	//then set reply to OK
+	reply.Status = tribproto.OK
 
 	return nil
 }
