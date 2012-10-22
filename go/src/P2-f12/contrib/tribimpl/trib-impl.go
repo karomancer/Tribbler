@@ -3,6 +3,9 @@ package tribimpl
 import (
 	"P2-f12/official/tribproto"
 	"P2-f12/contrib/libstore"
+	"strconv"
+	"math"
+	"encoding/json"
 )
 
 type Tribserver struct {
@@ -126,7 +129,8 @@ func (ts *Tribserver) GetSubscriptions(args *tribproto.GetSubscriptionsArgs, rep
 		return err0
 	}
 	//if they don't
-	if result != "1" {
+	_, errUser := strconv.Atoi(result)
+	if errUser != nil {
 		//then reply = NOSUCHUSER, nil
 		reply.Status = tribproto.ENOSUCHUSER
 		reply.Userids = nil
@@ -174,17 +178,54 @@ func (ts *Tribserver) GetTribbles(args *tribproto.GetTribblesArgs, reply *tribpr
 	//check errors for any calls to libstore
 
 	//check if user exists
-	//if not
-	//then reply = NOSUCHUSER, nil
-	//return nil
+	result, err0 := ts.lstore.Get(args.Userid)
+
+	if err0 != nil {
+		return err0
+	}
+	_, errUser := strconv.Atoi(result)
+	if errUser != nil {
+		//then reply = NOSUCHUSER, nil
+		reply.Status = tribproto.ENOSUCHUSER
+		reply.Tribbles = nil
+		//return nil
+		return nil
+	}
 
 	//else
 	//getList(user:tribbles) => 
-  //for 100 tribbles (or up to 100 tribbles) at end of array (newest pushed to end) 
-  //  get(tribble ID) and push onto tribbles array
-  //reply = OK, tribbles array
-  //return nil
+	tribs, err1 := ts.lstore.GetList(args.Userid + ":tribbles")
 
+	if err1 != nil {
+		return err1
+	}
+  	//for 100 tribbles (or up to 100 tribbles) at end of array (newest pushed to end) 
+  	numTribs := int(math.Min(100, float64(len(tribs))))
+  	// get(tribble ID) and push onto tribbles array
+  	var tribbles []tribproto.Tribble
+
+  	var i int
+  	for i = 0; i < numTribs; i++ {
+  		jtrib, err2 := ts.lstore.Get(tribs[len(tribs) - i - 1])
+
+  		if err2 != nil {
+  			return err2
+  		}
+
+  		var trib tribproto.Tribble
+  		jerr := json.Unmarshal([]byte(jtrib), &trib)
+
+  		if (jerr != nil) {
+  			return jerr
+  		}
+
+  		tribbles[i] = trib
+
+  	}
+  	//reply = OK, tribbles array
+  	reply.Status = tribproto.OK
+  	reply.Tribbles = tribbles
+  	//return nil
 	return nil
 }
 
