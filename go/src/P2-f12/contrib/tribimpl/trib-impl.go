@@ -37,7 +37,7 @@ func (ts *Tribserver) CreateUser(args *tribproto.CreateUserArgs, reply *tribprot
 	//call libstore.get on the user
 	result, err0 := ts.lstore.Get(args.Userid)
 
-	if (err0 != nil) {
+	if err0 != nil {
 		return err0
 	}
 	
@@ -54,7 +54,7 @@ func (ts *Tribserver) CreateUser(args *tribproto.CreateUserArgs, reply *tribprot
 	//we create it with a PUT(user, 1)
 	err1 := ts.lstore.Put(args.Userid, "0")
 
-	if (err1 != nil) {
+	if err1 != nil {
 		return err1
 	}
 	//then set reply to OK
@@ -149,20 +149,35 @@ func (ts *Tribserver) GetSubscriptions(args *tribproto.GetSubscriptionsArgs, rep
 
 
 	//check if subscriber exists
-	//then reply = NOSUCHUSER, nil
-	//return nil
+	result, err0 := ts.lstore.Get(args.Userid)
 
-	//check if user you are subscribing to
-	//then reply = NOSUCHTARGETUSER, nil
-	//return nil
+	if err0 != nil {
+		return err0
+	}
+	//if they don't
+	if result != "1" {
+		//then reply = NOSUCHUSER, nil
+		reply.Status = tribproto.ENOSUCHUSER
+		reply.Userids = nil
+		//return nil
+		return nil
+	}
+	//otherwise...
+	//then do getList (user:subscriptions)
+	subs, err1 := ts.lstore.GetList(args.Userid + ":subscriptions")
 
-	//so if both exist
-	//then do get List (user:subscriptions, target)
+	if err1 != nil {
+		return err1
+	}
 	//if there's no list, return an empty list
+	if subs == nil {
+		reply.Userids = []string{}
+	} else {
+		reply.Userids = subs
+	}
 	//then reply = OK, list
+	reply.Status = tribproto.OK
 	//return nil
-
-
 	return nil
 }
 
