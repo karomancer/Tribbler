@@ -70,8 +70,14 @@ func (ts *Tribserver) AddSubscription(args *tribproto.SubscriptionArgs, reply *t
 	targetExists, targetErr := ts.lstore.Get(targetId)
 
 	//if userErr != nil, then user doesn't exist
-	if userErr != nil { return userErr }
-	if targetErr != nil { return targetErr }
+	if userErr != nil { 
+		reply.Status = tribproto.ENOSUCHUSER
+		return userErr 
+	}
+	if targetErr != nil { 
+		reply.Status = tribproto.ENOSUCHTARGETUSER
+		return targetErr 
+	}
 
 	_, userConverr := strconv.Atoi(userExists)
 	_, targetConverr := strconv.Atoi(targetExists)
@@ -81,7 +87,7 @@ func (ts *Tribserver) AddSubscription(args *tribproto.SubscriptionArgs, reply *t
 	//return nil
 	if userConverr != nil {
 		reply.Status = tribproto.ENOSUCHUSER
-		return nil
+		return userConverr
 	}
 	
 	//if user subscribing to does not exist,
@@ -89,7 +95,7 @@ func (ts *Tribserver) AddSubscription(args *tribproto.SubscriptionArgs, reply *t
 	//return nil
 	if targetConverr != nil {
 		reply.Status = tribproto.ENOSUCHTARGETUSER
-		return nil
+		return targetConverr
 	}
 
 	//if both exist
