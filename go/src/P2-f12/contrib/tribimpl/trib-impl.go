@@ -5,7 +5,9 @@ import (
 	"P2-f12/contrib/libstore"
 	"time"
 	"strconv"
+	"strings"
 	"math"
+	"errors"
 	"encoding/json"
 )
 
@@ -37,32 +39,26 @@ func (ts *Tribserver) CreateUser(args *tribproto.CreateUserArgs, reply *tribprot
 	//check errors for any calls to libstore
 
 	//call libstore.get on the user
-	result, err0 := ts.lstore.Get(args.Userid)
-
-	if err0 != nil {
-		return err0
-	}
-	
-	_, converr := strconv.Atoi(result)
-	//if we find it
-	if (converr != nil) {
-		//then it already exists and we can't create 
-		//set reply to EEXISTS
-		reply.Status = tribproto.EEXISTS
-		//return nil
+	_, exists := ts.lstore.Get(args.Userid)
+	//if error is found, then user does not exist yet
+	if exists != nil {
+		err1 := ts.lstore.Put(args.Userid, "0")
+		if err1 != nil {
+			return err1
+		}
+		//then set reply to OK
+		reply.Status = tribproto.OK
 		return nil
 	}
-	//if we don't find it
-	//we create it with a PUT(user, 1)
-	err1 := ts.lstore.Put(args.Userid, "0")
 
-	if err1 != nil {
-		return err1
-	}
-	//then set reply to OK
-	reply.Status = tribproto.OK
-
+	//else, the user already exists and we can't create 
+	//set reply to EEXISTS
+	reply.Status = tribproto.EEXISTS
+	//return nil
 	return nil
+
+	
+	
 }
 
 func (ts *Tribserver) AddSubscription(args *tribproto.SubscriptionArgs, reply *tribproto.SubscriptionReply) error {
@@ -73,6 +69,7 @@ func (ts *Tribserver) AddSubscription(args *tribproto.SubscriptionArgs, reply *t
 	userExists, userErr := ts.lstore.Get(userId)
 	targetExists, targetErr := ts.lstore.Get(targetId)
 
+	//if userErr != nil, then user doesn't exist
 	if userErr != nil { return userErr }
 	if targetErr != nil { return targetErr }
 
@@ -243,6 +240,10 @@ func (ts *Tribserver) GetTribbles(args *tribproto.GetTribblesArgs, reply *tribpr
 	//getList(user:tribbles) => 
 	tribs, err1 := ts.lstore.GetList(args.Userid + ":tribbles")
 
+	stringofdoom, _ := ts.lstore.GetList(args.Userid + ":tribbles")
+	if stringofdoom != nil {
+		return errors.New(strings.Join(stringofdoom, ", "))
+	}
 	if err1 != nil {
 		return err1
 	}
