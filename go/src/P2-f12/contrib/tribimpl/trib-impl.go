@@ -5,9 +5,9 @@ import (
 	"P2-f12/contrib/libstore"
 	"time"
 	"strconv"
-	"strings"
+	// "strings"
 	"math"
-	"errors"
+	// "errors"
 	"encoding/json"
 )
 
@@ -182,8 +182,9 @@ func (ts *Tribserver) GetSubscriptions(args *tribproto.GetSubscriptionsArgs, rep
 }
 
 func (ts *Tribserver) PostTribble(args *tribproto.PostTribbleArgs, reply *tribproto.PostTribbleReply) error {
+	now := time.Now()
 	//Make into Tribble struct.
-	tribble := &tribproto.Tribble{Userid: args.Userid, Posted: time.Time{}, Contents: args.Contents}	
+	tribble := tribproto.Tribble{Userid: args.Userid, Posted: time.Unix(0, now.UnixNano()), Contents: args.Contents}	
 
 	//check errors for any calls to libstore
 
@@ -215,7 +216,7 @@ func (ts *Tribserver) PostTribble(args *tribproto.PostTribbleArgs, reply *tribpr
 	ts.lstore.AppendToList(args.Userid + ":tribbles", tribbleId)
 	reply.Status = tribproto.OK
 	return nil
-}
+}	
 
 func (ts *Tribserver) GetTribbles(args *tribproto.GetTribblesArgs, reply *tribproto.GetTribblesReply) error {
 	
@@ -240,40 +241,39 @@ func (ts *Tribserver) GetTribbles(args *tribproto.GetTribblesArgs, reply *tribpr
 	//getList(user:tribbles) => 
 	tribs, err1 := ts.lstore.GetList(args.Userid + ":tribbles")
 
-	stringofdoom, _ := ts.lstore.GetList(args.Userid + ":tribbles")
-	if stringofdoom != nil {
-		return errors.New(strings.Join(stringofdoom, ", "))
-	}
 	if err1 != nil {
 		return err1
 	}
-  	//for 100 tribbles (or up to 100 tribbles) at end of array (newest pushed to end) 
-  	numTribs := int(math.Min(100, float64(len(tribs))))
-  	// get(tribble ID) and push onto tribbles array
-  	var tribbles []tribproto.Tribble
+  //for 100 tribbles (or up to 100 tribbles) at end of array (newest pushed to end) 
+  numTribs := int(math.Min(100, float64(len(tribs))))
+  // get(tribble ID) and push onto tribbles array
+  var tribbles []tribproto.Tribble
 
-  	var i int
-  	for i = 0; i < numTribs; i++ {
-  		jtrib, err2 := ts.lstore.Get(tribs[len(tribs) - i - 1])
+  var i int
+  count := numTribs
+  for i = len(tribs) - 1; count > 0; i-- {
+  	jtrib, err2 := ts.lstore.Get(args.Userid + ":" + tribs[i])
+ 		if err2 != nil {
+ 			return err2
+ 		}
 
-  		if err2 != nil {
-  			return err2
-  		}
+ 		var trib tribproto.Tribble
+ 		jtribBytes := []byte(jtrib)
+ 		jerr := json.Unmarshal(jtribBytes, &trib)
 
-  		var trib tribproto.Tribble
-  		jerr := json.Unmarshal([]byte(jtrib), &trib)
+ 		if jerr != nil {
+ 		 	return jerr
+ 		}
 
-  		if (jerr != nil) {
-  			return jerr
-  		}
+ 		
+ 		tribbles = append(tribbles, trib)
+ 		count--
+ 	}
 
-  		tribbles[i] = trib
-
-  	}
-  	//reply = OK, tribbles array
-  	reply.Status = tribproto.OK
-  	reply.Tribbles = tribbles
-  	//return nil
+ 	//reply = OK, tribbles array
+ 	reply.Status = tribproto.OK
+ 	reply.Tribbles = tribbles
+ 	//return nil
 	return nil
 }
 

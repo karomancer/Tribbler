@@ -80,7 +80,6 @@ func main() {
 		PrintStatus(ci.funcname, status, err)
 	case "tl":  // tribble list
 		tribbles, status, err := client.GetTribbles(flag.Arg(1))
-		fmt.Println(err)
 		PrintStatus(ci.funcname, status, err)
 		if (err == nil && status == tribproto.OK) {
 			PrintTribbles(tribbles)
