@@ -5,6 +5,8 @@ import (
 	"P2-f12/contrib/libstore"
 	"time"
 	"strconv"
+	"math"
+	"encoding/json"
 )
 
 type Tribserver struct {
@@ -41,7 +43,7 @@ func (ts *Tribserver) CreateUser(args *tribproto.CreateUserArgs, reply *tribprot
 		return err0
 	}
 	
-	conv, converr := strconv.Atoi(result)
+	_, converr := strconv.Atoi(result)
 	//if we find it
 	if (converr != nil) {
 		//then it already exists and we can't create 
@@ -74,8 +76,8 @@ func (ts *Tribserver) AddSubscription(args *tribproto.SubscriptionArgs, reply *t
 	if userErr != nil { return userErr }
 	if targetErr != nil { return targetErr }
 
-	userConv, userConverr := strconv.Atoi(userExists)
-	targetConv, targetConverr := strconv.Atoi(targetExists)
+	_, userConverr := strconv.Atoi(userExists)
+	_, targetConverr := strconv.Atoi(targetExists)
 
 	//check if subscriber exists
 	//if not, then reply = NOSUCHUSER
@@ -114,8 +116,8 @@ func (ts *Tribserver) RemoveSubscription(args *tribproto.SubscriptionArgs, reply
 	if userErr != nil { return userErr }
 	if targetErr != nil { return targetErr }
 
-	userConv, userConverr := strconv.Atoi(userExists)
-	targetConv, targetConverr := strconv.Atoi(targetExists)
+	_, userConverr := strconv.Atoi(userExists)
+	_, targetConverr := strconv.Atoi(targetExists)
 
 	//check if subscriber exists
 	//if not, then reply = NOSUCHUSER
@@ -155,7 +157,8 @@ func (ts *Tribserver) GetSubscriptions(args *tribproto.GetSubscriptionsArgs, rep
 		return err0
 	}
 	//if they don't
-	if result != "1" {
+	_, errUser := strconv.Atoi(result)
+	if errUser != nil {
 		//then reply = NOSUCHUSER, nil
 		reply.Status = tribproto.ENOSUCHUSER
 		reply.Userids = nil
@@ -206,9 +209,12 @@ func (ts *Tribserver) PostTribble(args *tribproto.PostTribbleArgs, reply *tribpr
 	//append to list([user:tribbles], tribbleID)
 	//put tribble [user:tribbleID] = tribble
 	//return nil
+	tribbleJSON, marshalErr := json.Marshal(tribble)
+	if marshalErr != nil { return marshalErr }
+
 	tribbleId := strconv.Itoa(userConv + 1)
 	ts.lstore.Put(args.Userid, tribbleId)
-	ts.lstore.Put(args.Userid + ":" + tribbleId, tribble)
+	ts.lstore.Put(args.Userid + ":" + tribbleId, string(tribbleJSON))
 	ts.lstore.AppendToList(args.Userid + ":tribbles", tribbleId)
 	reply.Status = tribproto.OK
 	return nil
@@ -219,17 +225,54 @@ func (ts *Tribserver) GetTribbles(args *tribproto.GetTribblesArgs, reply *tribpr
 	//check errors for any calls to libstore
 
 	//check if user exists
-	//if not
-	//then reply = NOSUCHUSER, nil
-	//return nil
+	result, err0 := ts.lstore.Get(args.Userid)
+
+	if err0 != nil {
+		return err0
+	}
+	_, errUser := strconv.Atoi(result)
+	if errUser != nil {
+		//then reply = NOSUCHUSER, nil
+		reply.Status = tribproto.ENOSUCHUSER
+		reply.Tribbles = nil
+		//return nil
+		return nil
+	}
 
 	//else
 	//getList(user:tribbles) => 
-  //for 100 tribbles (or up to 100 tribbles) at end of array (newest pushed to end) 
-  //  get(tribble ID) and push onto tribbles array
-  //reply = OK, tribbles array
-  //return nil
+	tribs, err1 := ts.lstore.GetList(args.Userid + ":tribbles")
 
+	if err1 != nil {
+		return err1
+	}
+  	//for 100 tribbles (or up to 100 tribbles) at end of array (newest pushed to end) 
+  	numTribs := int(math.Min(100, float64(len(tribs))))
+  	// get(tribble ID) and push onto tribbles array
+  	var tribbles []tribproto.Tribble
+
+  	var i int
+  	for i = 0; i < numTribs; i++ {
+  		jtrib, err2 := ts.lstore.Get(tribs[len(tribs) - i - 1])
+
+  		if err2 != nil {
+  			return err2
+  		}
+
+  		var trib tribproto.Tribble
+  		jerr := json.Unmarshal([]byte(jtrib), &trib)
+
+  		if (jerr != nil) {
+  			return jerr
+  		}
+
+  		tribbles[i] = trib
+
+  	}
+  	//reply = OK, tribbles array
+  	reply.Status = tribproto.OK
+  	reply.Tribbles = tribbles
+  	//return nil
 	return nil
 }
 
