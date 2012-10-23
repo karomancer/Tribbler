@@ -258,7 +258,7 @@ func (ts *Tribserver) GetTribbles(args *tribproto.GetTribblesArgs, reply *tribpr
   var i int
   count := numTribs
   for i = len(tribs) - 1; count > 0; i-- {
-  	jtrib, err2 := ts.lstore.Get(args.Userid + ":" + tribs[i])
+  		jtrib, err2 := ts.lstore.Get(args.Userid + ":" + tribs[i])
  		if err2 != nil {
  			return err2
  		}
@@ -288,15 +288,77 @@ func (ts *Tribserver) GetTribblesBySubscription(args *tribproto.GetTribblesArgs,
 	//check errors for any calls to libstore
 
 	//check if user exists
-	//if not
-	//then reply = NOSUCHUSER, nil
-	//return nil
+	result, err0 := ts.lstore.Get(args.Userid)
+
+	if err0 != nil {
+		return err0
+	}
+	_, errUser := strconv.Atoi(result)
+	if errUser != nil {
+		//then reply = NOSUCHUSER, nil
+		reply.Status = tribproto.ENOSUCHUSER
+		reply.Tribbles = nil
+		//return nil
+		return nil
+	}
 
 	//else
 	//getList(user:subscriptions)
+	argsS := &tribproto.GetSubscriptionsArgs{Userid: args.Userid}
+	var reS tribproto.GetSubscriptionsReply
+
+	err1 := ts.GetSubscriptions(argsS, &reS)
+
+	if err1 != nil {
+		return err1
+	}
+
+	var subs []string
+	if reS.Status == tribproto.OK {
+		subs = reS.Userids
+	}
+
 	//for all users 
-	//	getTribbles for each user
+	var usrTribs [][]tribproto.Tribble
+	totalTribs := 0
+	for i := 0; i < len(subs); i++ {
+
+		args := &tribproto.GetTribblesArgs{Userid: subs[i]}
+		var re tribproto.GetTribblesReply
+
+		//getTribbles for each user
+		err2 := ts.GetTribbles(args, &re)
+
+		if err2 != nil {
+			return err2
+		}
+
+		if re.Status == tribproto.OK {
+			if len(re.Tribbles) > 0 {
+				usrTribs = append(usrTribs, re.Tribbles)
+				totalTribs += len(re.Tribbles)
+			}
+		}
+	}
 	//Go through all tribble lists, and create new list of most recent 100 tribbles 
+	numTribs := int(math.Min(100, float64(totalTribs)))
+	var replyTribs []tribproto.Tribble
+	for j := 0; j < numTribs; j++ {
+		ind := 0
+		minTrib := usrTribs[0][0]
+		for h := 1; h < len(usrTribs); h++ {
+			currTrib := usrTribs[h][0]
+			if currTrib.Posted.Before(minTrib.Posted) == true {
+				minTrib = currTrib
+				ind = h
+			}
+		}
+		usrTribs[ind] = usrTribs[ind][1:len(usrTribs[ind])]
+		replyTribs = append(replyTribs, minTrib)
+	}
+
+	reply.Status = tribproto.OK
+	reply.Tribbles = replyTribs
 
 	return nil
 }
