@@ -72,11 +72,11 @@ func (ts *Tribserver) AddSubscription(args *tribproto.SubscriptionArgs, reply *t
 	//if userErr != nil, then user doesn't exist
 	if userErr != nil { 
 		reply.Status = tribproto.ENOSUCHUSER
-		return userErr 
+		return nil 
 	}
 	if targetErr != nil { 
 		reply.Status = tribproto.ENOSUCHTARGETUSER
-		return targetErr 
+		return nil 
 	}
 
 	_, userConverr := strconv.Atoi(userExists)
@@ -87,7 +87,7 @@ func (ts *Tribserver) AddSubscription(args *tribproto.SubscriptionArgs, reply *t
 	//return nil
 	if userConverr != nil {
 		reply.Status = tribproto.ENOSUCHUSER
-		return userConverr
+		return nil
 	}
 	
 	//if user subscribing to does not exist,
@@ -95,7 +95,7 @@ func (ts *Tribserver) AddSubscription(args *tribproto.SubscriptionArgs, reply *t
 	//return nil
 	if targetConverr != nil {
 		reply.Status = tribproto.ENOSUCHTARGETUSER
-		return targetConverr
+		return nil
 	}
 
 	//if both exist
@@ -116,8 +116,14 @@ func (ts *Tribserver) RemoveSubscription(args *tribproto.SubscriptionArgs, reply
 	userExists, userErr := ts.lstore.Get(userId)
 	targetExists, targetErr := ts.lstore.Get(targetId)
 
-	if userErr != nil { return userErr }
-	if targetErr != nil { return targetErr }
+	if userErr != nil { 
+		reply.Status = tribproto.ENOSUCHUSER
+		return nil 
+	}
+	if targetErr != nil { 
+		reply.Status = tribproto.ENOSUCHTARGETUSER
+		return nil 
+	}
 
 	_, userConverr := strconv.Atoi(userExists)
 	_, targetConverr := strconv.Atoi(targetExists)
@@ -232,7 +238,9 @@ func (ts *Tribserver) GetTribbles(args *tribproto.GetTribblesArgs, reply *tribpr
 	result, err0 := ts.lstore.Get(args.Userid)
 
 	if err0 != nil {
-		return err0
+		reply.Status = tribproto.ENOSUCHUSER
+		reply.Tribbles = nil
+		return nil
 	}
 	_, errUser := strconv.Atoi(result)
 	if errUser != nil {
@@ -291,16 +299,11 @@ func (ts *Tribserver) GetTribblesBySubscription(args *tribproto.GetTribblesArgs,
 	result, err0 := ts.lstore.Get(args.Userid)
 
 	if err0 != nil {
-		return err0
-	}
-	_, errUser := strconv.Atoi(result)
-	if errUser != nil {
-		//then reply = NOSUCHUSER, nil
 		reply.Status = tribproto.ENOSUCHUSER
-		reply.Tribbles = nil
-		//return nil
 		return nil
 	}
+	_, errUser := strconv.Atoi(result)
+	if errUser != nil { return errUser }
 
 	//else
 	//getList(user:subscriptions)
@@ -309,20 +312,16 @@ func (ts *Tribserver) GetTribblesBySubscription(args *tribproto.GetTribblesArgs,
 
 	err1 := ts.GetSubscriptions(argsS, &reS)
 
-	if err1 != nil {
+	var subs []string
+	if reS.Status != tribproto.OK || err1 != nil {
+		reply.Status = reS.Status
 		return err1
 	}
-
-	var subs []string
-	if reS.Status == tribproto.OK {
-		subs = reS.Userids
-	}
-
+	subs = reS.Userids
 	//for all users 
-	var usrTribs [][]tribproto.Tribble
+	usrTribs := make(map[string]([]tribproto.Tribble))
 	totalTribs := 0
 	for i := 0; i < len(subs); i++ {
-
 		args := &tribproto.GetTribblesArgs{Userid: subs[i]}
 		var re tribproto.GetTribblesReply
 
@@ -335,26 +334,39 @@ func (ts *Tribserver) GetTribblesBySubscription(args *tribproto.GetTribblesArgs,
 
 		if re.Status == tribproto.OK {
 			if len(re.Tribbles) > 0 {
-				usrTribs = append(usrTribs, re.Tribbles)
+				usrTribs[subs[i]] = re.Tribbles
 				totalTribs += len(re.Tribbles)
 			}
 		}
+
 	}
 	//Go through all tribble lists, and create new list of most recent 100 tribbles 
 	numTribs := int(math.Min(100, float64(totalTribs)))
-	var replyTribs []tribproto.Tribble
+	replyTribs := []tribproto.Tribble{}
 	for j := 0; j < numTribs; j++ {
-		ind := 0
-		minTrib := usrTribs[0][0]
-		for h := 1; h < len(usrTribs); h++ {
-			currTrib := usrTribs[h][0]
-			if currTrib.Posted.Before(minTrib.Posted) == true {
-				minTrib = currTrib
-				ind = h
+		var id string
+		var latestTrib tribproto.Tribble
+		
+		for userId, tribbles := range usrTribs {
+			var currTrib tribproto.Tribble
+			if len(tribbles) > 0 { currTrib = tribbles[0] }			
+			if currTrib.Posted.After(latestTrib.Posted) == true || id == "" || latestTrib.Posted.IsZero() == true {
+				latestTrib = currTrib
+				id = userId
 			}
 		}
-		usrTribs[ind] = usrTribs[ind][1:len(usrTribs[ind])]
-		replyTribs = append(replyTribs, minTrib)
+		
+		replyTribs = append(replyTribs, latestTrib)
+
+		//new list without latestTrib
+		tribbles := usrTribs[id]
+		newArray := []tribproto.Tribble{}
+		for k:=1; k < len(tribbles); k++ {
+			newArray = append(newArray, tribbles[k])	
+		} 
+		
+		usrTribs[id] = newArray
+
 	}
 
 	reply.Status = tribproto.OK
