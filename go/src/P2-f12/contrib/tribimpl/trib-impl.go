@@ -72,11 +72,11 @@ func (ts *Tribserver) AddSubscription(args *tribproto.SubscriptionArgs, reply *t
 	//if userErr != nil, then user doesn't exist
 	if userErr != nil { 
 		reply.Status = tribproto.ENOSUCHUSER
-		return userErr 
+		return nil 
 	}
 	if targetErr != nil { 
 		reply.Status = tribproto.ENOSUCHTARGETUSER
-		return targetErr 
+		return nil 
 	}
 
 	_, userConverr := strconv.Atoi(userExists)
@@ -87,7 +87,7 @@ func (ts *Tribserver) AddSubscription(args *tribproto.SubscriptionArgs, reply *t
 	//return nil
 	if userConverr != nil {
 		reply.Status = tribproto.ENOSUCHUSER
-		return userConverr
+		return nil
 	}
 	
 	//if user subscribing to does not exist,
@@ -95,7 +95,7 @@ func (ts *Tribserver) AddSubscription(args *tribproto.SubscriptionArgs, reply *t
 	//return nil
 	if targetConverr != nil {
 		reply.Status = tribproto.ENOSUCHTARGETUSER
-		return targetConverr
+		return nil
 	}
 
 	//if both exist
@@ -116,8 +116,14 @@ func (ts *Tribserver) RemoveSubscription(args *tribproto.SubscriptionArgs, reply
 	userExists, userErr := ts.lstore.Get(userId)
 	targetExists, targetErr := ts.lstore.Get(targetId)
 
-	if userErr != nil { return userErr }
-	if targetErr != nil { return targetErr }
+	if userErr != nil { 
+		reply.Status = tribproto.ENOSUCHUSER
+		return nil 
+	}
+	if targetErr != nil { 
+		reply.Status = tribproto.ENOSUCHTARGETUSER
+		return nil 
+	}
 
 	_, userConverr := strconv.Atoi(userExists)
 	_, targetConverr := strconv.Atoi(targetExists)
@@ -232,7 +238,9 @@ func (ts *Tribserver) GetTribbles(args *tribproto.GetTribblesArgs, reply *tribpr
 	result, err0 := ts.lstore.Get(args.Userid)
 
 	if err0 != nil {
-		return err0
+		reply.Status = tribproto.ENOSUCHUSER
+		reply.Tribbles = nil
+		return nil
 	}
 	_, errUser := strconv.Atoi(result)
 	if errUser != nil {
