@@ -1,5 +1,5 @@
 // Sample implementation of libstore
-// Assumes 1 storage server (and hence doesn't cache client RPC connections)
+// Assumes 1 storage server (and hence doesn't connCache client RPC connections)
 // Does not support caching
 package libstore
 
@@ -17,8 +17,18 @@ import (
 type Libstore struct {
 	cli *rpc.Client
 	nodelist []storageproto.Node
-	cache map [string]*rpc.Client
+	connCache map [string]*rpc.Client
 	cacheM chan int
+
+	getCache map [string]string //map from user key to json string
+	getM chan int
+
+	getListCache map[string]([]string) //map from user key to array of json strings
+	getListM chan int
+
+	leaseMap map[string]storageproto.LeaseStruct
+	leaseM chan int
+
 	flags int
 	myhostport string
 }
@@ -29,6 +39,25 @@ func (nl nodeL) Swap(i, j int) { nl[i], nl[j] = nl[j], nl[i]}
 
 type byID struct{ nodeL }
 func (c byID) Less(i, j int) bool { return c.nodeL[i].NodeID < c.nodeL[j].NodeID }
+
+func (ls *Libstore) leaseTimer(key string, seconds int) {
+	timer := time.NewTimer(time.Second)
+	lease, exists := ls.leaseMap[key]
+	if exists == false { return }
+
+	for ls.leaseMap[key].ValidSeconds > 0 {
+		select {
+			case <- timer.C:
+				<- ls.leaseM 
+				lease.ValidSeconds--
+				ls.leaseMap[key] = lease
+				ls.leaseM <- 1
+		}
+	}
+	<- ls.leaseM
+	delete(ls.leaseMap, key)
+	ls.leaseM <- 1
+}
 
 
 func iNewLibstore(server string, myhostport string, flags int) (*Libstore, error) {
@@ -68,10 +97,23 @@ func iNewLibstore(server string, myhostport string, flags int) (*Libstore, error
 
 	sort.Sort(byID{ls.nodelist})
 
-	//initialize the cache
-	ls.cache = make(map[string]*rpc.Client)
+	//initialize the connCache
+	ls.connCache = make(map[string]*rpc.Client)
 	ls.cacheM = make(chan int, 1)
 	ls.cacheM <- 1
+
+	ls.getCache = make(map[string]string)
+	ls.getM = make(chan int, 1)
+	ls.getM <- 1
+
+	ls.getListCache = make(map[string]([]string))
+	ls.getListM = make(chan int, 1)
+	ls.getListM <- 1
+
+	ls.leaseMap = make(map[string]storageproto.LeaseStruct)
+
+	ls.leaseM = make(chan int, 1)
+	ls.leaseM <- 1
 
 	// do NOT connect to other storage servers here
 	// this should be done in a lazy fashion upon the first use
@@ -103,7 +145,7 @@ func (ls *Libstore) getServer(key string) (*rpc.Client, error) {
 	// rpc connection caching
 	// Don't forget to properly synchronize when caching rpc connections
 	<- ls.cacheM
-	ls.cache[key] = cli
+	ls.connCache[key] = cli
 	ls.cacheM <- 1
 
 	return cli, nil
@@ -111,20 +153,23 @@ func (ls *Libstore) getServer(key string) (*rpc.Client, error) {
 
 
 func (ls *Libstore) iGet(key string) (string, error) {
-	fmt.Println("balh!")
-	wantlease := false
+	//check if lease is still valid
+	lease, found := ls.leaseMap[key]
+
+	if found == true && lease.Granted == true { return ls.getCache[key], nil } 
+
+	wantlease := true
 	args := &storageproto.GetArgs{key, wantlease, ls.myhostport}
 	var reply storageproto.GetReply
 
 
-	fmt.Printf("getting stuffs\n")
-
-	//check cache for key
+	//check connCache for key
 	<- ls.cacheM
 	fmt.Printf("hanging?\n")
-	node, ok := ls.cache[key]
+	node, ok := ls.connCache[key]
 	ls.cacheM <- 1
 	//if it isn't found, we need to figure out which node to connect to
+
 	cli := node
 	var err error
 	if ok != true {
@@ -143,6 +188,17 @@ func (ls *Libstore) iGet(key string) (string, error) {
 	if reply.Status != storageproto.OK {
 		return "", lsplog.MakeErr("Get failed:  Storage error")
 	}
+	
+	<- ls.leaseM
+	ls.leaseMap[key] = storageproto.LeaseStruct{Granted: true, ValidSeconds: storageproto.LEASE_SECONDS}
+	ls.leaseM <- 1
+
+	<- ls.getM
+	ls.getCache[key] = reply.Value
+	ls.getM <- 1
+
+	go ls.leaseTimer(key, storageproto.LEASE_SECONDS)
+
 	return reply.Value, nil
 }
 
@@ -150,9 +206,9 @@ func (ls *Libstore) iPut(key, value string) error {
 	args := &storageproto.PutArgs{key, value}
 	var reply storageproto.PutReply
 
-	//check cache for key
+	//check connCache for key
 	<- ls.cacheM
-	node, ok := ls.cache[key]
+	node, ok := ls.connCache[key]
 	ls.cacheM <- 1
 	//if it isn't found, we need to figure out which node to connect to
 	cli := node
@@ -176,13 +232,17 @@ func (ls *Libstore) iPut(key, value string) error {
 }
 
 func (ls *Libstore) iGetList(key string) ([]string, error) {
-	wantlease := false
+	lease, found := ls.leaseMap[key]
+
+	if found == true && lease.Granted == true { return ls.getListCache[key], nil } 
+
+	wantlease := true
 	args := &storageproto.GetArgs{key, wantlease, ls.myhostport}
 	var reply storageproto.GetListReply
 
-	//check cache for key
+	//check connCache for key
 	<- ls.cacheM
-	node, ok := ls.cache[key]
+	node, ok := ls.connCache[key]
 	ls.cacheM <- 1
 	//if it isn't found, we need to figure out which node to connect to
 	cli := node
@@ -202,16 +262,27 @@ func (ls *Libstore) iGetList(key string) ([]string, error) {
 	if reply.Status != storageproto.OK {
 		return nil, lsplog.MakeErr("GetList failed:  Storage error")
 	}
+	<- ls.leaseM
+	ls.leaseMap[key] = storageproto.LeaseStruct{Granted: true, ValidSeconds: storageproto.LEASE_SECONDS}
+	ls.leaseM <- 1
+
+	<- ls.getListM
+	ls.getListCache[key] = reply.Value
+	ls.getListM <- 1
+
+	go ls.leaseTimer(key, storageproto.LEASE_SECONDS)
+
 	return reply.Value, nil
 }
+
 
 func (ls *Libstore) iRemoveFromList(key, removeitem string) error {
 	args := &storageproto.PutArgs{key, removeitem}
 	var reply storageproto.PutReply
 
-	//check cache for key
+	//check connCache for key
 	<- ls.cacheM
-	node, ok := ls.cache[key]
+	node, ok := ls.connCache[key]
 	ls.cacheM <- 1
 	//if it isn't found, we need to figure out which node to connect to
 	cli := node
@@ -238,9 +309,9 @@ func (ls *Libstore) iAppendToList(key, newitem string) error {
 	args := &storageproto.PutArgs{key, newitem}
 	var reply storageproto.PutReply
 
-	//check cache for key
+	//check connCache for key
 	<- ls.cacheM
-	node, ok := ls.cache[key]
+	node, ok := ls.connCache[key]
 	ls.cacheM <- 1
 	//if it isn't found, we need to figure out which node to connect to
 	cli := node
