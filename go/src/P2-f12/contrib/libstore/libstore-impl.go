@@ -154,9 +154,16 @@ func (ls *Libstore) getServer(key string) (*rpc.Client, error) {
 
 func (ls *Libstore) iGet(key string) (string, error) {
 	//check if lease is still valid
+	<- ls.leaseM 
 	lease, found := ls.leaseMap[key]
+	ls.leaseM <- 1
 
-	if found == true && lease.Granted == true { return ls.getCache[key], nil } 
+	if found == true && lease.Granted == true { 
+		<- ls.getM
+		thang := ls.getCache[key]
+		ls.getM <- 1
+		return thang, nil 
+	} 
 
 	wantlease := true
 	args := &storageproto.GetArgs{key, wantlease, ls.myhostport}
@@ -232,9 +239,16 @@ func (ls *Libstore) iPut(key, value string) error {
 }
 
 func (ls *Libstore) iGetList(key string) ([]string, error) {
+	<- ls.leaseM
 	lease, found := ls.leaseMap[key]
+	ls.leaseM <- 1
 
-	if found == true && lease.Granted == true { return ls.getListCache[key], nil } 
+	if found == true && lease.Granted == true { 
+		<- ls.getM
+		thang := ls.getListCache[key]
+		ls.getM <- 1
+		return thang, nil 
+	} 
 
 	wantlease := true
 	args := &storageproto.GetArgs{key, wantlease, ls.myhostport}
