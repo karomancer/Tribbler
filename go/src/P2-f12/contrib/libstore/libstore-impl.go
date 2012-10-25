@@ -41,22 +41,20 @@ type byID struct{ nodeL }
 func (c byID) Less(i, j int) bool { return c.nodeL[i].NodeID < c.nodeL[j].NodeID }
 
 func (ls *Libstore) leaseTimer(key string, seconds int) {
-	timer := time.NewTimer(time.Second)
-	lease, exists := ls.leaseMap[key]
+	timer := time.NewTimer(10*time.Second)
+	<- ls.leaseM
+	_, exists := ls.leaseMap[key]
+	ls.leaseM <- 1
 	if exists == false { return }
 
-	for ls.leaseMap[key].ValidSeconds > 0 {
-		select {
-			case <- timer.C:
-				<- ls.leaseM 
-				lease.ValidSeconds--
-				ls.leaseMap[key] = lease
-				ls.leaseM <- 1
-		}
+
+	select {
+		case <- timer.C:
+			<- ls.leaseM 
+			delete(ls.leaseMap, key)
+			ls.leaseM <- 1
 	}
-	<- ls.leaseM
-	delete(ls.leaseMap, key)
-	ls.leaseM <- 1
+		
 }
 
 
@@ -238,11 +236,12 @@ func (ls *Libstore) iPut(key, value string) error {
 
 func (ls *Libstore) iGetList(key string) ([]string, error) {
 	<- ls.leaseM
-	lease, found := ls.leaseMap[key]
+	_, found := ls.leaseMap[key]
 	ls.leaseM <- 1
 
-	if found == true && lease.Granted == true { 
+	if found == true { 
 		<- ls.getM
+		fmt.Println("Already in cache!")
 		thang := ls.getListCache[key]
 		ls.getM <- 1
 		return thang, nil 
