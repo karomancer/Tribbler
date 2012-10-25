@@ -123,6 +123,16 @@ func iNewLibstore(server string, myhostport string, flags int) (*Libstore, error
 }
 
 func (ls *Libstore) getServer(key string) (*rpc.Client, error) {
+
+	<- ls.cacheM
+	node, ok := ls.connCache[key]
+	fmt.Println("chcking connection cache for key: %v, found: %v", key, ok)
+	ls.cacheM <- 1
+
+	if ok == true {
+		return node, nil
+	}
+
 	// Use beginning of key to group related keys together
 	precolon := strings.Split(key, ":")[0]
 	keyid := Storehash(precolon)
@@ -145,7 +155,12 @@ func (ls *Libstore) getServer(key string) (*rpc.Client, error) {
 	// rpc connection caching
 	// Don't forget to properly synchronize when caching rpc connections
 	<- ls.cacheM
+	fmt.Println("caching connection for key, cli", key)
+	fmt.Println("client for key", cli)
 	ls.connCache[key] = cli
+	val, ok := ls.connCache[key]
+	fmt.Println("cached successfully?", ok)
+	fmt.Println("val of cache", val)
 	ls.cacheM <- 1
 
 	return cli, nil
@@ -155,12 +170,14 @@ func (ls *Libstore) getServer(key string) (*rpc.Client, error) {
 func (ls *Libstore) iGet(key string) (string, error) {
 	//check if lease is still valid
 	<- ls.leaseM 
+	fmt.Println("looking for lease for key: %v", key)
 	lease, found := ls.leaseMap[key]
 	ls.leaseM <- 1
 
 	if found == true && lease.Granted == true { 
 		<- ls.getM
 		thang := ls.getCache[key]
+		fmt.Println("got value for key: %v, which is: %v", key, thang)
 		ls.getM <- 1
 		return thang, nil 
 	} 
@@ -169,22 +186,10 @@ func (ls *Libstore) iGet(key string) (string, error) {
 	args := &storageproto.GetArgs{key, wantlease, ls.myhostport}
 	var reply storageproto.GetReply
 
-
-	//check connCache for key
-	<- ls.cacheM
-	fmt.Printf("hanging?\n")
-	node, ok := ls.connCache[key]
-	ls.cacheM <- 1
-	//if it isn't found, we need to figure out which node to connect to
-
-	cli := node
-	var err error
-	if ok != true {
-		cli, err = ls.getServer(key)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "error in get server\n")
-			return "", err
-		}
+	cli, err := ls.getServer(key)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error in get server\n")
+		return "", err
 	}
 
 	err = cli.Call("StorageRPC.Get", args, &reply)
@@ -213,20 +218,13 @@ func (ls *Libstore) iPut(key, value string) error {
 	args := &storageproto.PutArgs{key, value}
 	var reply storageproto.PutReply
 
-	//check connCache for key
-	<- ls.cacheM
-	node, ok := ls.connCache[key]
-	ls.cacheM <- 1
-	//if it isn't found, we need to figure out which node to connect to
-	cli := node
-	var err error
-	if ok != true {
-		cli, err = ls.getServer(key)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "error in get server\n")
-			return err
-		}
+
+	cli, err := ls.getServer(key)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error in get server\n")
+		return err
 	}
+
 
 	err = cli.Call("StorageRPC.Put", args, &reply)
 	if err != nil {
@@ -254,20 +252,13 @@ func (ls *Libstore) iGetList(key string) ([]string, error) {
 	args := &storageproto.GetArgs{key, wantlease, ls.myhostport}
 	var reply storageproto.GetListReply
 
-	//check connCache for key
-	<- ls.cacheM
-	node, ok := ls.connCache[key]
-	ls.cacheM <- 1
-	//if it isn't found, we need to figure out which node to connect to
-	cli := node
-	var err error
-	if ok != true {
-		cli, err = ls.getServer(key)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "error in get server\n")
-			return nil, err
-		}
+
+	cli, err := ls.getServer(key)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error in get server\n")
+		return nil, err
 	}
+
 
 	err = cli.Call("StorageRPC.GetList", args, &reply)
 	if err != nil {
@@ -294,20 +285,13 @@ func (ls *Libstore) iRemoveFromList(key, removeitem string) error {
 	args := &storageproto.PutArgs{key, removeitem}
 	var reply storageproto.PutReply
 
-	//check connCache for key
-	<- ls.cacheM
-	node, ok := ls.connCache[key]
-	ls.cacheM <- 1
-	//if it isn't found, we need to figure out which node to connect to
-	cli := node
-	var err error
-	if ok != true {
-		cli, err = ls.getServer(key)
+
+		cli, err := ls.getServer(key)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "error in get server\n")
 			return err
 		}
-	}
+
 
 	err = cli.Call("StorageRPC.RemoveFromList", args, &reply)
 	if err != nil {
@@ -323,20 +307,13 @@ func (ls *Libstore) iAppendToList(key, newitem string) error {
 	args := &storageproto.PutArgs{key, newitem}
 	var reply storageproto.PutReply
 
-	//check connCache for key
-	<- ls.cacheM
-	node, ok := ls.connCache[key]
-	ls.cacheM <- 1
-	//if it isn't found, we need to figure out which node to connect to
-	cli := node
-	var err error
-	if ok != true {
-		cli, err = ls.getServer(key)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "error in get server\n")
-			return err
-		}
+	
+	cli, err := ls.getServer(key)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error in get server\n")
+		return err
 	}
+
 
 	err = cli.Call("StorageRPC.AppendToList", args, &reply)
 	if err != nil {
