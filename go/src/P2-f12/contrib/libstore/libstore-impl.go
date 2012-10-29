@@ -1,11 +1,10 @@
 // Sample implementation of libstore
-// Assumes 1 storage server (and hence doesn't connCache client RPC connections)
-// Does not support caching
 package libstore
 
 import (
 	"P2-f12/official/lsplog"
 	"P2-f12/official/storageproto"
+	"P2-f12/official/cacherpc"
 	"net/rpc"
 	"strings"
 	"fmt"
@@ -28,6 +27,8 @@ type Libstore struct {
 
 	leaseMap map[string]storageproto.LeaseStruct
 	leaseM chan int
+
+	crpc *cacherpc.CacheRPC
 
 	flags int
 	myhostport string
@@ -55,6 +56,17 @@ func (ls *Libstore) leaseTimer(key string, seconds int) {
 			ls.leaseM <- 1
 	}
 		
+}
+
+func (ls *Libstore) RevokeLease(args *storageproto.RevokeLeaseArgs, reply *storageproto.RevokeLeaseReply) error {
+	_, ok := ls.leaseMap[args.Key]
+
+	if (ok == true) {
+		delete(ls.leaseMap, args.Key)
+	}
+
+	reply.Status = storageproto.OK
+	return nil	
 }
 
 
@@ -112,6 +124,8 @@ func iNewLibstore(server string, myhostport string, flags int) (*Libstore, error
 
 	ls.leaseM = make(chan int, 1)
 	ls.leaseM <- 1
+
+	ls.crpc = cacherpc.NewCacheRPC(ls)
 
 	// do NOT connect to other storage servers here
 	// this should be done in a lazy fashion upon the first use
