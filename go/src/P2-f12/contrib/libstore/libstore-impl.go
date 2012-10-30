@@ -34,6 +34,7 @@ type Libstore struct {
 	myhostport string
 }
 
+//set up sorting for the storage server list
 type nodeL []storageproto.Node
 func (nl nodeL) Len() int { return len(nl) }
 func (nl nodeL) Swap(i, j int) { nl[i], nl[j] = nl[j], nl[i]}
@@ -41,29 +42,19 @@ func (nl nodeL) Swap(i, j int) { nl[i], nl[j] = nl[j], nl[i]}
 type byID struct{ nodeL }
 func (c byID) Less(i, j int) bool { return c.nodeL[i].NodeID < c.nodeL[j].NodeID }
 
+
+//lease timer for leases! whoo
 func (ls *Libstore) leaseTimer(key string, seconds int) {
-	timer := time.NewTimer(10*time.Second)
+	time.Sleep(time.Duration(seconds)*time.Second)
 	<- ls.leaseM
-	_, exists := ls.leaseMap[key]
-	ls.leaseM <- 1
-	if exists == false { return }
-
-
-	select {
-		case <- timer.C:
-			<- ls.leaseM 
-			delete(ls.leaseMap, key)
-			ls.leaseM <- 1
-	}
-		
+	delete(ls.leaseMap, key)
+	ls.leaseM <- 1		
 }
 
 func (ls *Libstore) RevokeLease(args *storageproto.RevokeLeaseArgs, reply *storageproto.RevokeLeaseReply) error {
-	_, ok := ls.leaseMap[args.Key]
-
-	if (ok == true) {
-		delete(ls.leaseMap, args.Key)
-	}
+	<- ls.leaseM 
+	delete(ls.leaseMap, args.Key)
+	ls.leaseM <- 1
 
 	reply.Status = storageproto.OK
 	return nil	
@@ -126,6 +117,7 @@ func iNewLibstore(server string, myhostport string, flags int) (*Libstore, error
 	ls.leaseM <- 1
 
 	ls.crpc = cacherpc.NewCacheRPC(ls)
+	rpc.Register(ls.crpc)
 
 	// do NOT connect to other storage servers here
 	// this should be done in a lazy fashion upon the first use
@@ -138,7 +130,7 @@ func (ls *Libstore) getServer(key string) (*rpc.Client, error) {
 
 	<- ls.cacheM
 	node, ok := ls.connCache[key]
-	fmt.Println("chcking connection cache for key: %v, found: %v", key, ok)
+	//fmt.Println("chcking connection cache for key: %v, found: %v", key, ok)
 	ls.cacheM <- 1
 
 	if ok == true {
@@ -149,14 +141,19 @@ func (ls *Libstore) getServer(key string) (*rpc.Client, error) {
 	precolon := strings.Split(key, ":")[0]
 	keyid := Storehash(precolon)
 	//we gotta find out which dude we want to connect to
-	fmt.Printf("Finding node for key: %v\n", keyid)
+	//fmt.Printf("Finding node for key: %v\n", keyid)
 	var i int
 	for i = 0; i < len(ls.nodelist); i++ {
 		if ls.nodelist[i].NodeID > keyid {
 			break
 		}
 	}
-	nodeIndex := i
+	var nodeIndex int
+	if i < len(ls.nodelist) {
+		nodeIndex = i
+	} else {
+		nodeIndex = len(ls.nodelist) - 1
+	}
 	//make the connection
 	hostport := ls.nodelist[nodeIndex].HostPort
 	cli, err := rpc.DialHTTP("tcp", hostport)
@@ -167,12 +164,12 @@ func (ls *Libstore) getServer(key string) (*rpc.Client, error) {
 	// rpc connection caching
 	// Don't forget to properly synchronize when caching rpc connections
 	<- ls.cacheM
-	fmt.Println("caching connection for key, cli", key)
-	fmt.Println("client for key", cli)
+	//fmt.Println("caching connection for key, cli", key)
+	//fmt.Println("client for key", cli)
 	ls.connCache[key] = cli
-	val, ok := ls.connCache[key]
-	fmt.Println("cached successfully?", ok)
-	fmt.Println("val of cache", val)
+	_, ok = ls.connCache[key]
+	//fmt.Println("cached successfully?", ok)
+	//fmt.Println("val of cache", val)
 	ls.cacheM <- 1
 
 	return cli, nil
@@ -182,19 +179,25 @@ func (ls *Libstore) getServer(key string) (*rpc.Client, error) {
 func (ls *Libstore) iGet(key string) (string, error) {
 	//check if lease is still valid
 	<- ls.leaseM 
-	fmt.Println("looking for lease for key: %v", key)
+	//fmt.Println("looking for lease for key: %v", key)
 	lease, found := ls.leaseMap[key]
 	ls.leaseM <- 1
 
 	if found == true && lease.Granted == true { 
 		<- ls.getM
 		thang := ls.getCache[key]
-		fmt.Println("got value for key: %v, which is: %v", key, thang)
+		//fmt.Println("got value for key: %v, which is: %v", key, thang)
 		ls.getM <- 1
 		return thang, nil 
 	} 
 
-	wantlease := true
+	var wantlease bool
+	if ls.myhostport == "" {
+		wantlease = false
+	} else {
+		wantlease = true
+	}
+
 	args := &storageproto.GetArgs{key, wantlease, ls.myhostport}
 	var reply storageproto.GetReply
 
@@ -213,15 +216,17 @@ func (ls *Libstore) iGet(key string) (string, error) {
 		return "", lsplog.MakeErr("Get failed:  Storage error")
 	}
 	
-	<- ls.leaseM
-	ls.leaseMap[key] = storageproto.LeaseStruct{Granted: true, ValidSeconds: storageproto.LEASE_SECONDS}
-	ls.leaseM <- 1
+	if reply.Lease.Granted == true {
+		<- ls.leaseM
+		ls.leaseMap[key] = storageproto.LeaseStruct{Granted: true, ValidSeconds: storageproto.LEASE_SECONDS}
+		ls.leaseM <- 1
 
-	<- ls.getM
-	ls.getCache[key] = reply.Value
-	ls.getM <- 1
+		<- ls.getM
+		ls.getCache[key] = reply.Value
+		ls.getM <- 1
 
-	go ls.leaseTimer(key, storageproto.LEASE_SECONDS)
+		go ls.leaseTimer(key, storageproto.LEASE_SECONDS)
+	}
 
 	return reply.Value, nil
 }
@@ -255,13 +260,18 @@ func (ls *Libstore) iGetList(key string) ([]string, error) {
 
 	if found == true { 
 		<- ls.getM
-		fmt.Println("Already in cache!")
+		//fmt.Println("Already in cache!")
 		thang := ls.getListCache[key]
 		ls.getM <- 1
 		return thang, nil 
 	} 
 
-	wantlease := true
+	var wantlease bool
+	if ls.myhostport == "" {
+		wantlease = false
+	} else {
+		wantlease = true
+	}
 	args := &storageproto.GetArgs{key, wantlease, ls.myhostport}
 	var reply storageproto.GetListReply
 
@@ -274,21 +284,26 @@ func (ls *Libstore) iGetList(key string) ([]string, error) {
 
 
 	err = cli.Call("StorageRPC.GetList", args, &reply)
+
 	if err != nil {
 		return nil, err
 	}
 	if reply.Status != storageproto.OK {
 		return nil, lsplog.MakeErr("GetList failed:  Storage error")
 	}
-	<- ls.leaseM
-	ls.leaseMap[key] = storageproto.LeaseStruct{Granted: true, ValidSeconds: storageproto.LEASE_SECONDS}
-	ls.leaseM <- 1
 
-	<- ls.getListM
-	ls.getListCache[key] = reply.Value
-	ls.getListM <- 1
+	if reply.Lease.Granted == true {
 
-	go ls.leaseTimer(key, storageproto.LEASE_SECONDS)
+		<- ls.leaseM
+		ls.leaseMap[key] = storageproto.LeaseStruct{Granted: true, ValidSeconds: storageproto.LEASE_SECONDS}
+		ls.leaseM <- 1
+
+		<- ls.getListM
+		ls.getListCache[key] = reply.Value
+		ls.getListM <- 1
+
+		go ls.leaseTimer(key, storageproto.LEASE_SECONDS)
+	}
 
 	return reply.Value, nil
 }
@@ -299,11 +314,11 @@ func (ls *Libstore) iRemoveFromList(key, removeitem string) error {
 	var reply storageproto.PutReply
 
 
-		cli, err := ls.getServer(key)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "error in get server\n")
-			return err
-		}
+	cli, err := ls.getServer(key)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error in get server\n")
+		return err
+	}
 
 
 	err = cli.Call("StorageRPC.RemoveFromList", args, &reply)
