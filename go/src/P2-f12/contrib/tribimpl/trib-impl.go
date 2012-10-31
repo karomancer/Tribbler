@@ -5,6 +5,7 @@ import (
 	"P2-f12/contrib/libstore"
 	"time"
 	"strconv"
+	"fmt"
 	// "strings"
 	"math"
 	// "errors"
@@ -137,21 +138,13 @@ func (ts *Tribserver) GetSubscriptions(args *tribproto.GetSubscriptionsArgs, rep
 
 
 	//check if subscriber exists
-	result, userErr := ts.lstore.Get(args.Userid)
+	_, userErr := ts.lstore.Get(args.Userid)
 
 	if userErr != nil {
 		reply.Status = tribproto.ENOSUCHUSER
 		return nil 
 	}
-	//if they don't
-	_, errUser := strconv.Atoi(result)
-	if errUser != nil {
-		//then reply = NOSUCHUSER, nil
-		reply.Status = tribproto.ENOSUCHUSER
-		reply.Userids = nil
-		//return nil
-		return nil
-	}
+	
 	//otherwise...
 	//then do getList (user:subscriptions)
 	subs, err1 := ts.lstore.GetList(args.Userid + ":subscriptions")
@@ -172,28 +165,18 @@ func (ts *Tribserver) GetSubscriptions(args *tribproto.GetSubscriptionsArgs, rep
 }
 
 func (ts *Tribserver) PostTribble(args *tribproto.PostTribbleArgs, reply *tribproto.PostTribbleReply) error {
-	now := time.Now()
+	now := time.Now().UnixNano()
 	//Make into Tribble struct.
-	tribble := tribproto.Tribble{Userid: args.Userid, Posted: time.Unix(0, now.UnixNano()), Contents: args.Contents}	
+	tribble := tribproto.Tribble{Userid: args.Userid, Posted: time.Unix(0, now), Contents: args.Contents}	
 
 	//check errors for any calls to libstore
 
 
 	//check if user exists
-	userExists, userErr := ts.lstore.Get(args.Userid)
+	_, userErr := ts.lstore.Get(args.Userid)
 	if userErr != nil {
 		reply.Status = tribproto.ENOSUCHUSER
 		return nil 
-	}
-
-	userConv, userConverr := strconv.Atoi(userExists)
-
-	//if not
-	//then reply = NOSUCHUSER
-	//return nil
-	if userConverr != nil {
-		reply.Status = tribproto.ENOSUCHUSER
-		return nil
 	}
 
 	//else
@@ -203,10 +186,12 @@ func (ts *Tribserver) PostTribble(args *tribproto.PostTribbleArgs, reply *tribpr
 	tribbleJSON, marshalErr := json.Marshal(tribble)
 	if marshalErr != nil { return marshalErr }
 
-	tribbleId := strconv.Itoa(userConv + 1)
-	ts.lstore.Put(args.Userid, tribbleId)
-	ts.lstore.Put(args.Userid + ":" + tribbleId, string(tribbleJSON))
-	ts.lstore.AppendToList(args.Userid + ":tribbles", tribbleId)
+	//format timestamps in hex 
+	tribbleId := strconv.FormatInt(now, 16)
+	ts.lstore.Put(args.Userid, tribbleId) //mostly for checking for existance for other functions
+	ts.lstore.Put(args.Userid + ":" + tribbleId, string(tribbleJSON)) 
+	ts.lstore.AppendToList(args.Userid + ":timestamps", tribbleId)
+	fmt.Println("****POST! time_id: " + tribbleId)
 	reply.Status = tribproto.OK
 	return nil
 }	
@@ -216,25 +201,17 @@ func (ts *Tribserver) GetTribbles(args *tribproto.GetTribblesArgs, reply *tribpr
 	//check errors for any calls to libstore
 
 	//check if user exists
-	result, userErr := ts.lstore.Get(args.Userid)
+	_, userErr := ts.lstore.Get(args.Userid)
 
 	if userErr != nil {
 		reply.Status = tribproto.ENOSUCHUSER
 		reply.Tribbles = nil
 		return nil
 	}
-	_, convErr := strconv.Atoi(result)
-	if convErr != nil {
-		//then reply = NOSUCHUSER, nil
-		reply.Status = tribproto.ENOSUCHUSER
-		reply.Tribbles = nil
-		//return nil
-		return nil
-	}
-
+	
 	//else
-	//getList(user:tribbles) => 
-	tribs, listErr := ts.lstore.GetList(args.Userid + ":tribbles")
+	//getList(user:timestamps) => 
+	timestamps, listErr := ts.lstore.GetList(args.Userid + ":timestamps")
 
 	//if there's an error in retrieving a list, it means there are no tribbles
 	if listErr != nil {
@@ -243,14 +220,14 @@ func (ts *Tribserver) GetTribbles(args *tribproto.GetTribblesArgs, reply *tribpr
 		return nil
 	}
   //for 100 tribbles (or up to 100 tribbles) at end of array (newest pushed to end) 
-  numTribs := int(math.Min(100, float64(len(tribs))))
+  numTribs := int(math.Min(100, float64(len(timestamps))))
   // get(tribble ID) and push onto tribbles array
   var tribbles []tribproto.Tribble
 
   var i int
   count := numTribs
-  for i = len(tribs) - 1; count > 0; i-- {
-  		jtrib, err2 := ts.lstore.Get(args.Userid + ":" + tribs[i])
+  for i = len(timestamps) - 1; count > 0; i-- {
+  	jtrib, err2 := ts.lstore.Get(args.Userid + ":" + timestamps[i])
  		if err2 != nil {
  			return err2
  		}
@@ -306,20 +283,18 @@ func (ts *Tribserver) GetTribblesBySubscription(args *tribproto.GetTribblesArgs,
 	}
 	subs = reS.Userids
 	//for all users 
-	usrTribs := make(map[string]([]tribproto.Tribble))
+	usrTimestamps := make(map[string]([]string))
 	totalTribs := 0
 	for i := 0; i < len(subs); i++ {
 		args := &tribproto.GetTribblesArgs{Userid: subs[i]}
-		var re tribproto.GetTribblesReply
 
 		//getTribbles for each user
-		ts.GetTribbles(args, &re)
+		timestamps, listErr := ts.lstore.GetList(args.Userid + ":timestamps")
 
-		if re.Status == tribproto.OK {
-			if len(re.Tribbles) > 0 {
-				usrTribs[subs[i]] = re.Tribbles
-				totalTribs += len(re.Tribbles)
-			}
+		//if not empty
+		if listErr == nil && len(timestamps) > 0 {
+			usrTimestamps[subs[i]] = timestamps
+			totalTribs += len(timestamps)
 		}
 
 	}
@@ -328,27 +303,45 @@ func (ts *Tribserver) GetTribblesBySubscription(args *tribproto.GetTribblesArgs,
 	replyTribs := []tribproto.Tribble{}
 	for j := 0; j < numTribs; j++ {
 		var id string
-		var latestTrib tribproto.Tribble
+		latest := ""
 		
-		for userId, tribbles := range usrTribs {
-			var currTrib tribproto.Tribble
-			if len(tribbles) > 0 { currTrib = tribbles[0] }			
-			if currTrib.Posted.After(latestTrib.Posted) == true || id == "" || latestTrib.Posted.IsZero() == true {
-				latestTrib = currTrib
-				id = userId
-			}
+		for userId, timestamps := range usrTimestamps {
+			if len(timestamps) > 0 {
+				curr := timestamps[0] 
+				nanoCurr, _ := strconv.ParseInt(curr, 16, 64)
+				nanoLatest, _ := strconv.ParseInt(latest, 16, 64)
+				if nanoCurr > nanoLatest {
+					latest = curr
+					id = userId
+				}
+			}			
+			
 		}
 		
-		replyTribs = append(replyTribs, latestTrib)
+		//error makes no sense because we have these timestamps from a previous get
+		jtrib, ohgawderr := ts.lstore.Get(args.Userid + ":" + latest)
+		if ohgawderr != nil { 
+					fmt.Println("*****" + latest + "\t" + jtrib + "\t")
 
-		//new list without latestTrib
-		tribbles := usrTribs[id]
-		newArray := []tribproto.Tribble{}
-		for k:=1; k < len(tribbles); k++ {
-			newArray = append(newArray, tribbles[k])	
+			return ohgawderr 
+		}
+
+ 		var trib tribproto.Tribble
+ 		jtribBytes := []byte(jtrib)
+ 		jerr := json.Unmarshal(jtribBytes, &trib)
+
+ 		if jerr != nil { return jerr }
+
+		replyTribs = append(replyTribs, trib)
+
+		//new list without latest Trib
+		timestamps := usrTimestamps[id]
+		newArray := []string{}
+		for k:=1; k < len(timestamps); k++ {
+			newArray = append(newArray, timestamps[k])	
 		} 
-		
-		usrTribs[id] = newArray
+		 	
+		usrTimestamps[id] = newArray
 
 	}
 
