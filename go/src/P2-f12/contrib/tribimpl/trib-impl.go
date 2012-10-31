@@ -18,7 +18,9 @@ type Tribserver struct {
 }
 
 func NewTribserver(storagemaster string, myhostport string) *Tribserver {
-	lstore, _ := libstore.NewLibstore(storagemaster, myhostport, 0)
+	lstore, err := libstore.NewLibstore(storagemaster, myhostport, 0)
+
+	if err != nil { return nil }
 
 	//pass storagemaster and hostport to new libstore with flags for debugging
 	//make new libstore
@@ -66,8 +68,8 @@ func (ts *Tribserver) AddSubscription(args *tribproto.SubscriptionArgs, reply *t
 	targetId := args.Targetuser
 
 	//check errors for any calls to libstore
-	userExists, userErr := ts.lstore.Get(userId)
-	targetExists, targetErr := ts.lstore.Get(targetId)
+	_, userErr := ts.lstore.Get(userId)
+	_, targetErr := ts.lstore.Get(targetId)
 
 	//if userErr != nil, then user doesn't exist
 	if userErr != nil { 
@@ -79,24 +81,15 @@ func (ts *Tribserver) AddSubscription(args *tribproto.SubscriptionArgs, reply *t
 		return nil 
 	}
 
-	_, userConverr := strconv.Atoi(userExists)
-	_, targetConverr := strconv.Atoi(targetExists)
-
-	//check if subscriber exists
-	//if not, then reply = NOSUCHUSER
-	//return nil
-	if userConverr != nil {
-		reply.Status = tribproto.ENOSUCHUSER
-		return nil
-	}
-	
-	//if user subscribing to does not exist,
-	//then reply = NOSUCHTARGETUSER
-	//return nil
-	if targetConverr != nil {
-		reply.Status = tribproto.ENOSUCHTARGETUSER
-		return nil
-	}
+	subs, subErr := ts.lstore.GetList(args.Userid + ":subscriptions")
+	if subErr == nil { 
+		for i:=0; i < len(subs); i++ {
+			if subs[i] == targetId {
+				reply.Status = tribproto.EEXISTS
+				return nil
+			}
+		}
+	}	
 
 	//if both exist
 	//then do append to List (user:subscriptions, target)
@@ -113,8 +106,8 @@ func (ts *Tribserver) RemoveSubscription(args *tribproto.SubscriptionArgs, reply
 	targetId := args.Targetuser
 
 	//check errors for any calls to libstore
-	userExists, userErr := ts.lstore.Get(userId)
-	targetExists, targetErr := ts.lstore.Get(targetId)
+	_, userErr := ts.lstore.Get(userId)
+	_, targetErr := ts.lstore.Get(targetId)
 
 	if userErr != nil { 
 		reply.Status = tribproto.ENOSUCHUSER
@@ -125,31 +118,15 @@ func (ts *Tribserver) RemoveSubscription(args *tribproto.SubscriptionArgs, reply
 		return nil 
 	}
 
-	_, userConverr := strconv.Atoi(userExists)
-	_, targetConverr := strconv.Atoi(targetExists)
-
-	//check if subscriber exists
-	//if not, then reply = NOSUCHUSER
-	//return nil
-	if userConverr != nil {
-		reply.Status = tribproto.ENOSUCHUSER
-		return nil
-	}
-	
-	//if user subscribing to does not exist,
-	//then reply = NOSUCHTARGETUSER
-	//return nil
-	if targetConverr != nil {
-		reply.Status = tribproto.ENOSUCHTARGETUSER
-		return nil
-	}
-
 	//if both exist
 	//then remove from List (user:subscriptions, target)
 	//then reply = OK
 	//return nil
 	removeErr := ts.lstore.RemoveFromList(userId + ":subscriptions", targetId)
-	if removeErr != nil { return removeErr }
+	if removeErr != nil { 
+		reply.Status = tribproto.ENOSUCHTARGETUSER
+		return nil 
+	}
 	reply.Status = tribproto.OK
 	return nil
 }
