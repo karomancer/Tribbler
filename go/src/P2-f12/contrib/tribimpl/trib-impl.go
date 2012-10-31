@@ -137,10 +137,11 @@ func (ts *Tribserver) GetSubscriptions(args *tribproto.GetSubscriptionsArgs, rep
 
 
 	//check if subscriber exists
-	result, err0 := ts.lstore.Get(args.Userid)
+	result, userErr := ts.lstore.Get(args.Userid)
 
-	if err0 != nil {
-		return err0
+	if userErr != nil {
+		reply.Status = tribproto.ENOSUCHUSER
+		return nil 
 	}
 	//if they don't
 	_, errUser := strconv.Atoi(result)
@@ -180,7 +181,10 @@ func (ts *Tribserver) PostTribble(args *tribproto.PostTribbleArgs, reply *tribpr
 
 	//check if user exists
 	userExists, userErr := ts.lstore.Get(args.Userid)
-	if userErr != nil { return userErr }
+	if userErr != nil {
+		reply.Status = tribproto.ENOSUCHUSER
+		return nil 
+	}
 
 	userConv, userConverr := strconv.Atoi(userExists)
 
@@ -212,15 +216,15 @@ func (ts *Tribserver) GetTribbles(args *tribproto.GetTribblesArgs, reply *tribpr
 	//check errors for any calls to libstore
 
 	//check if user exists
-	result, err0 := ts.lstore.Get(args.Userid)
+	result, userErr := ts.lstore.Get(args.Userid)
 
-	if err0 != nil {
+	if userErr != nil {
 		reply.Status = tribproto.ENOSUCHUSER
 		reply.Tribbles = nil
 		return nil
 	}
-	_, errUser := strconv.Atoi(result)
-	if errUser != nil {
+	_, convErr := strconv.Atoi(result)
+	if convErr != nil {
 		//then reply = NOSUCHUSER, nil
 		reply.Status = tribproto.ENOSUCHUSER
 		reply.Tribbles = nil
@@ -230,10 +234,13 @@ func (ts *Tribserver) GetTribbles(args *tribproto.GetTribblesArgs, reply *tribpr
 
 	//else
 	//getList(user:tribbles) => 
-	tribs, err1 := ts.lstore.GetList(args.Userid + ":tribbles")
+	tribs, listErr := ts.lstore.GetList(args.Userid + ":tribbles")
 
-	if err1 != nil {
-		return err1
+	//if there's an error in retrieving a list, it means there are no tribbles
+	if listErr != nil {
+		reply.Status = tribproto.OK
+		reply.Tribbles = []tribproto.Tribble{}
+		return nil
 	}
   //for 100 tribbles (or up to 100 tribbles) at end of array (newest pushed to end) 
   numTribs := int(math.Min(100, float64(len(tribs))))
@@ -273,26 +280,29 @@ func (ts *Tribserver) GetTribblesBySubscription(args *tribproto.GetTribblesArgs,
 	//check errors for any calls to libstore
 
 	//check if user exists
-	result, err0 := ts.lstore.Get(args.Userid)
+	_, userErr := ts.lstore.Get(args.Userid)
 
-	if err0 != nil {
+	if userErr != nil {
 		reply.Status = tribproto.ENOSUCHUSER
 		return nil
 	}
-	_, errUser := strconv.Atoi(result)
-	if errUser != nil { return errUser }
-
+	
 	//else
 	//getList(user:subscriptions)
 	argsS := &tribproto.GetSubscriptionsArgs{Userid: args.Userid}
 	var reS tribproto.GetSubscriptionsReply
 
-	err1 := ts.GetSubscriptions(argsS, &reS)
+	suberr := ts.GetSubscriptions(argsS, &reS)
+	if suberr != nil {
+		reply.Status = tribproto.OK
+		reply.Tribbles = []tribproto.Tribble{}	
+		return nil
+	}
 
 	var subs []string
-	if reS.Status != tribproto.OK || err1 != nil {
+	if reS.Status != tribproto.OK {
 		reply.Status = reS.Status
-		return err1
+		return nil
 	}
 	subs = reS.Userids
 	//for all users 
@@ -303,11 +313,7 @@ func (ts *Tribserver) GetTribblesBySubscription(args *tribproto.GetTribblesArgs,
 		var re tribproto.GetTribblesReply
 
 		//getTribbles for each user
-		err2 := ts.GetTribbles(args, &re)
-
-		if err2 != nil {
-			return err2
-		}
+		ts.GetTribbles(args, &re)
 
 		if re.Status == tribproto.OK {
 			if len(re.Tribbles) > 0 {
