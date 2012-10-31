@@ -52,7 +52,9 @@ func (ls *Libstore) leaseTimer(key string, seconds int) {
 }
 
 func (ls *Libstore) RevokeLease(args *storageproto.RevokeLeaseArgs, reply *storageproto.RevokeLeaseReply) error {
+	fmt.Printf("revoke lease called\n")
 	<- ls.leaseM 
+	fmt.Printf("revoking stuffs\n")
 	delete(ls.leaseMap, args.Key)
 	ls.leaseM <- 1
 
@@ -167,7 +169,6 @@ func (ls *Libstore) getServer(key string) (*rpc.Client, error) {
 	//fmt.Println("caching connection for key, cli", key)
 	//fmt.Println("client for key", cli)
 	ls.connCache[key] = cli
-	_, ok = ls.connCache[key]
 	//fmt.Println("cached successfully?", ok)
 	//fmt.Println("val of cache", val)
 	ls.cacheM <- 1
@@ -202,10 +203,10 @@ func (ls *Libstore) iGet(key string) (string, error) {
 	var reply storageproto.GetReply
 
 	cli, err := ls.getServer(key)
-	if err != nil {
+	/*if err != nil {
 		fmt.Fprintf(os.Stderr, "error in get server\n")
 		return "", err
-	}
+	}*/
 
 	err = cli.Call("StorageRPC.Get", args, &reply)
 	if err != nil {
@@ -315,10 +316,10 @@ func (ls *Libstore) iRemoveFromList(key, removeitem string) error {
 
 
 	cli, err := ls.getServer(key)
-	if err != nil {
+	/*if err != nil {
 		fmt.Fprintf(os.Stderr, "error in get server\n")
 		return err
-	}
+	}*/
 
 
 	err = cli.Call("StorageRPC.RemoveFromList", args, &reply)
@@ -337,18 +338,20 @@ func (ls *Libstore) iAppendToList(key, newitem string) error {
 
 	
 	cli, err := ls.getServer(key)
-	if err != nil {
+	/*if err != nil {
 		fmt.Fprintf(os.Stderr, "error in get server\n")
 		return err
-	}
+	}*/
 
 
 	err = cli.Call("StorageRPC.AppendToList", args, &reply)
 	if err != nil {
+		fmt.Println("rpccall err")
 		return err
 	}
+
 	if reply.Status != storageproto.OK {
-		return lsplog.MakeErr("AppendToList failed:  Storage error")
+			return lsplog.MakeErr("AppendToList failed:  Storage error")
 	}
 	return nil
 }

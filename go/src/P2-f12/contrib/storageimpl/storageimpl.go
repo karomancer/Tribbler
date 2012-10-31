@@ -18,6 +18,8 @@ import (
 )
 
 type Storageserver struct {
+	nodeid uint32
+	isMaster bool
 }
 
 func reallySeedTheDamnRNG() {
@@ -26,7 +28,34 @@ func reallySeedTheDamnRNG() {
 }
 
 func NewStorageserver(master string, numnodes int, portnum int, nodeid uint32) *Storageserver {
-	return &Storageserver{}
+	ss := &Storageserver{}
+
+	//if no nodeid is provided, choose one randomly
+	if nodeid == nil {
+		reallySeedTheDamnRNG()
+		ss.nodeid = rand.Uint32()
+	} else {
+		//otherwise just take the one they gave you
+		ss.nodeid = nodeid
+	}
+
+	if numnodes != nil && master == nil {
+		isMaster = true
+	} else {
+		isMaster = false
+	}
+
+	if isMaster == false {
+		args := storageproto.RegisterArgs{}
+		info := storageproto.Node{}
+		info.HostPort = portnum
+		info.NodeID = nodeid 
+		args.ServerInfo = info
+		reply := storageproto.RegisterReply{}
+		err := RegisterServer(args, reply)
+	} 
+
+	return ss
 }
 
 // Non-master servers to the master
