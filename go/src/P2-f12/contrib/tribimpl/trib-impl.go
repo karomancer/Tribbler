@@ -5,7 +5,7 @@ import (
 	"P2-f12/contrib/libstore"
 	"time"
 	"strconv"
-	"fmt"
+	// "fmt"
 	// "strings"
 	"math"
 	// "errors"
@@ -191,8 +191,8 @@ func (ts *Tribserver) PostTribble(args *tribproto.PostTribbleArgs, reply *tribpr
 	ts.lstore.Put(args.Userid, tribbleId) //mostly for checking for existance for other functions
 	ts.lstore.Put(args.Userid + ":" + tribbleId, string(tribbleJSON)) 
 	ts.lstore.AppendToList(args.Userid + ":timestamps", tribbleId)
-	fmt.Println("****POST! time_id: " + tribbleId)
 	reply.Status = tribproto.OK
+	// fmt.Println("*****POST" + args.Userid + ":" + tribbleId + "\t" + string(tribbleJSON) + "\t")
 	return nil
 }	
 
@@ -307,7 +307,7 @@ func (ts *Tribserver) GetTribblesBySubscription(args *tribproto.GetTribblesArgs,
 		
 		for userId, timestamps := range usrTimestamps {
 			if len(timestamps) > 0 {
-				curr := timestamps[0] 
+				curr := timestamps[len(timestamps) - 1] 
 				nanoCurr, _ := strconv.ParseInt(curr, 16, 64)
 				nanoLatest, _ := strconv.ParseInt(latest, 16, 64)
 				if nanoCurr > nanoLatest {
@@ -319,10 +319,9 @@ func (ts *Tribserver) GetTribblesBySubscription(args *tribproto.GetTribblesArgs,
 		}
 		
 		//error makes no sense because we have these timestamps from a previous get
-		jtrib, ohgawderr := ts.lstore.Get(args.Userid + ":" + latest)
+		jtrib, ohgawderr := ts.lstore.Get(id + ":" + latest)
 		if ohgawderr != nil { 
-					fmt.Println("*****" + latest + "\t" + jtrib + "\t")
-
+			// fmt.Println("*****GET " + args.Userid + ":" + latest + "\t" + jtrib + "\t")
 			return ohgawderr 
 		}
 
@@ -337,7 +336,7 @@ func (ts *Tribserver) GetTribblesBySubscription(args *tribproto.GetTribblesArgs,
 		//new list without latest Trib
 		timestamps := usrTimestamps[id]
 		newArray := []string{}
-		for k:=1; k < len(timestamps); k++ {
+		for k:=0; k < len(timestamps) - 1; k++ {
 			newArray = append(newArray, timestamps[k])	
 		} 
 		 	

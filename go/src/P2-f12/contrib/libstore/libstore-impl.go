@@ -52,9 +52,9 @@ func (ls *Libstore) leaseTimer(key string, seconds int) {
 }
 
 func (ls *Libstore) RevokeLease(args *storageproto.RevokeLeaseArgs, reply *storageproto.RevokeLeaseReply) error {
-	fmt.Printf("revoke lease called\n")
+	// fmt.Printf("revoke lease called\n")
 	<- ls.leaseM 
-	fmt.Printf("revoking stuffs\n")
+	// fmt.Printf("revoking stuffs\n")
 	delete(ls.leaseMap, args.Key)
 	ls.leaseM <- 1
 
