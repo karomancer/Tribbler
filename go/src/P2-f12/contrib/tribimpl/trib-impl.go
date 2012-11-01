@@ -192,7 +192,6 @@ func (ts *Tribserver) PostTribble(args *tribproto.PostTribbleArgs, reply *tribpr
 	ts.lstore.Put(args.Userid + ":" + tribbleId, string(tribbleJSON)) 
 	ts.lstore.AppendToList(args.Userid + ":timestamps", tribbleId)
 	reply.Status = tribproto.OK
-	// fmt.Println("*****POST" + args.Userid + ":" + tribbleId + "\t" + string(tribbleJSON) + "\t")
 	return nil
 }	
 
@@ -261,35 +260,25 @@ func (ts *Tribserver) GetTribblesBySubscription(args *tribproto.GetTribblesArgs,
 
 	if userErr != nil {
 		reply.Status = tribproto.ENOSUCHUSER
-		return nil
+		return nil	
 	}
 	
-	//else
-	//getList(user:subscriptions)
-	argsS := &tribproto.GetSubscriptionsArgs{Userid: args.Userid}
-	var reS tribproto.GetSubscriptionsReply
+	//Get subscriptions
+	subs, suberr := ts.lstore.GetList(args.Userid + ":subscriptions")
 
-	suberr := ts.GetSubscriptions(argsS, &reS)
+	//err indicates there are no subscriptions
 	if suberr != nil {
 		reply.Status = tribproto.OK
 		reply.Tribbles = []tribproto.Tribble{}	
 		return nil
 	}
 
-	var subs []string
-	if reS.Status != tribproto.OK {
-		reply.Status = reS.Status
-		return nil
-	}
-	subs = reS.Userids
 	//for all users 
 	usrTimestamps := make(map[string]([]string))
 	totalTribs := 0
 	for i := 0; i < len(subs); i++ {
-		args := &tribproto.GetTribblesArgs{Userid: subs[i]}
-
 		//getTribbles for each user
-		timestamps, listErr := ts.lstore.GetList(args.Userid + ":timestamps")
+		timestamps, listErr := ts.lstore.GetList(subs[i] + ":timestamps")
 
 		//if not empty
 		if listErr == nil && len(timestamps) > 0 {
@@ -321,7 +310,6 @@ func (ts *Tribserver) GetTribblesBySubscription(args *tribproto.GetTribblesArgs,
 		//error makes no sense because we have these timestamps from a previous get
 		jtrib, ohgawderr := ts.lstore.Get(id + ":" + latest)
 		if ohgawderr != nil { 
-			// fmt.Println("*****GET " + args.Userid + ":" + latest + "\t" + jtrib + "\t")
 			return ohgawderr 
 		}
 
