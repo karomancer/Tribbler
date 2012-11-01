@@ -13,7 +13,10 @@ import (
 	"P2-f12/official/storageproto"
 	crand "crypto/rand"
 	"math"
+	"strconv"
 	"math/big"
+	"time"
+	"net/rpc"
 	"math/rand"
 )
 
@@ -36,7 +39,7 @@ func NewStorageserver(master string, numnodes int, portnum int, nodeid uint32) *
 	ss := &Storageserver{}
 
 	//if no nodeid is provided, choose one randomly
-	if nodeid == nil {
+	if nodeid == 0 {
 		reallySeedTheDamnRNG()
 		ss.nodeid = rand.Uint32()
 	} else {
@@ -44,10 +47,10 @@ func NewStorageserver(master string, numnodes int, portnum int, nodeid uint32) *
 		ss.nodeid = nodeid
 	}
 
-	if numnodes != nil && master == nil {
-		isMaster = true
+	if numnodes != 0 && master == "" {
+		ss.isMaster = true
 	} else {
-		isMaster = false
+		ss.isMaster = false
 	}
 
 	ss.nodeList = []storageproto.Node{}
@@ -58,29 +61,27 @@ func NewStorageserver(master string, numnodes int, portnum int, nodeid uint32) *
 	ss.nodeMapM = make(chan int, 1)
 	ss.nodeMapM <- 1
 
-	if isMaster == false {
+	if ss.isMaster == false {
 		//connect to the master server
-		var master *rpc.Client
+		var masterClient *rpc.Client
 		var err error
 		for err != nil {
 			//keep retrying until we can actually conenct
-			master, err = rpc.DialHTTP("tcp", master)
-			time.Sleep(1000000000)	
+			//(Master may not have started yet)
+			masterClient, err = rpc.DialHTTP("tcp", master)
+			time.Sleep(time.Duration(3)*time.Second)	
 		}
 
 		//set up args for registering ourselves
-		args := storageproto.RegisterArgs{}
-		info := storageproto.Node{}
-		info.HostPort = portnum
-		info.NodeID = nodeid 
-		args.ServerInfo = info
+		info := storageproto.Node{HostPort: ":" + strconv.Itoa(portnum), NodeID: nodeid}
+		args := storageproto.RegisterArgs{ServerInfo: info}
 		reply := storageproto.RegisterReply{}
 
 		for err != nil || reply.Ready != true {
 			//call register on the master node with our info as the args. Kinda weird
-			err = master.Call("StorageRPC.RegisterServer", args, reply)
+			err = masterClient.Call("StorageRPC.RegisterServer", args, reply)
 			//keep retrying until all things are registered
-			time.Sleep(1000000000)
+			time.Sleep(time.Duration(3)*time.Second)	
 		}
 
 		//gotta still set up some other shits
@@ -88,7 +89,7 @@ func NewStorageserver(master string, numnodes int, portnum int, nodeid uint32) *
 		//spec is pretty vague...
 		<- ss.nodeListM
 		ss.nodeList = reply.Servers
-		ss.nodelistM <- 1
+		ss.nodeListM <- 1
 
 		//non master doesn't keep a node map cause fuck you
 
@@ -100,13 +101,13 @@ func NewStorageserver(master string, numnodes int, portnum int, nodeid uint32) *
 		if (numnodes == 0) {
 			numnodes = 1
 		}
-		ss.numNodes = numNodes;
+		ss.numNodes = numnodes;
 		<- ss.nodeListM
 		//append self to nodeList and put self in map
-		append(ss.nodeList, &Node{})//some shit here})
+		ss.nodeList = append(ss.nodeList, storageproto.Node{})//some shit here})
 		ss.nodeListM <- 1
 		<- ss.nodeMapM
-		ss.nodeMap[&Node{}] = 0 //someshithere}] = 0
+		ss.nodeMap[storageproto.Node{}] = 0 //someshithere}] = 0
 	}
 
 	return ss
@@ -122,14 +123,14 @@ func (ss *Storageserver) RegisterServer(args *storageproto.RegisterArgs, reply *
 	if ok != true {
 		//put it in the list
 		<- ss.nodeListM
-		append(ss.nodeList, args.ServerInfo)
+		ss.nodeList = append(ss.nodeList, args.ServerInfo)
 		//put it in the map w/ it's index in the list just cause whatever bro
 		//map is just easy way to check for duplicates anyway
-		ss.nodeMap[args.ServerInfo] = ss.nodeList.length()
+		ss.nodeMap[args.ServerInfo] = len(ss.nodeList)
 	} 
 
 	//check to see if all nodes have registered
-	if ss.nodeList.length() == ss.numNodes {
+	if len(ss.nodeList) == ss.numNodes {
 		//if so we are ready
 		reply.Ready = true
 	} else {
@@ -156,7 +157,7 @@ func (ss *Storageserver) GetServers(args *storageproto.GetServersArgs, reply *st
 	<- ss.nodeListM
 
 	//check to see if all nodes have registered
-	if ss.nodeList.length() == ss.numNodes {
+	if len(ss.nodeList) == ss.numNodes {
 		//if so we are ready
 		reply.Ready = true
 	} else {
