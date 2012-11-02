@@ -159,7 +159,7 @@ func NewStorageserver(master string, numnodes int, portnum int, nodeid uint32) *
 		}
 
 		//set up args for registering ourselves
-		info := storageproto.Node{HostPort: ":" + strconv.Itoa(portnum), NodeID: nodeid}
+		info := storageproto.Node{HostPort: strconv.Itoa(portnum), NodeID: ss.nodeid}
 		args := storageproto.RegisterArgs{ServerInfo: info}
 		reply := storageproto.RegisterReply{}
 
@@ -191,17 +191,19 @@ func NewStorageserver(master string, numnodes int, portnum int, nodeid uint32) *
 		ss.numNodes = numnodes
 		<- ss.nodeListM
 		//append self to nodeList and put self in map
-		me := storageproto.Node{HostPort: "localhost:" + strconv.Itoa(portnum), NodeID: nodeid}
+		me := storageproto.Node{HostPort: "localhost:" + strconv.Itoa(portnum), NodeID: ss.nodeid}
 		ss.nodeList = append(ss.nodeList, me)//some shit here})
 		ss.nodeListM <- 1
 		<- ss.nodeMapM
 		ss.nodeMap[me] = 0 //someshithere}] = 0
+		ss.nodeMapM <- 1
 	}
 
 	ss.srpc = storagerpc.NewStorageRPC(ss)
 	rpc.Register(ss.srpc)
 	go ss.GarbageCollector()
 
+	fmt.Println("Connected!")
 	return ss
 }
 
@@ -214,6 +216,7 @@ func (ss *Storageserver) RegisterServer(args *storageproto.RegisterArgs, reply *
 	//if not we have to add it to the map and to the list
 	if ok != true {
 		//put it in the list
+		fmt.Println("Hostport: %v, NodeID: %v\n", args.ServerInfo.HostPort, args.ServerInfo.NodeID)
 		<- ss.nodeListM
 		ss.nodeList = append(ss.nodeList, args.ServerInfo)
 		//put it in the map w/ it's index in the list just cause whatever bro
