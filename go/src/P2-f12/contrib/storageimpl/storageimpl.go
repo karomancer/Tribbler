@@ -25,7 +25,6 @@ import (
 	"time"
 	"net/rpc"
 	"math/rand"
-	"fmt"
 	"strings"
 	"fmt"
 )
@@ -166,7 +165,7 @@ func NewStorageserver(master string, numnodes int, portnum int, nodeid uint32) *
 
 		for err != nil || reply.Ready != true {
 			//call register on the master node with our info as the args. Kinda weird
-			err = masterClient.Call("StorageRPC.RegisterServer", &args, &reply)
+			err = masterClient.Call("StorageRPC.Register", &args, &reply)
 			//keep retrying until all things are registered
 			fmt.Println("Trying to register with master...")
 			time.Sleep(time.Duration(3)*time.Second)	
@@ -198,7 +197,7 @@ func NewStorageserver(master string, numnodes int, portnum int, nodeid uint32) *
 		<- ss.nodeMapM
 		ss.nodeMap[me] = 0 //someshithere}] = 0
 	}
-	
+
 	ss.srpc = storagerpc.NewStorageRPC(ss)
 	rpc.Register(ss.srpc)
 	go ss.GarbageCollector()
