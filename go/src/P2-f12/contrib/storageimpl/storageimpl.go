@@ -17,6 +17,7 @@ package storageimpl
 
 import (
 	"P2-f12/official/storageproto"
+	"P2-f12/official/storagerpc"
 	crand "crypto/rand"
 	"math"
 	"strconv"
@@ -25,6 +26,7 @@ import (
 	"net/rpc"
 	"math/rand"
 	"strings"
+	"fmt"
 )
 
 type Storageserver struct {
@@ -51,6 +53,8 @@ type Storageserver struct {
 
 	valMap map[string]string
 	valMapM chan int
+
+	srpc *storagerpc.StorageRPC
 }
 
 func reallySeedTheDamnRNG() {
@@ -189,6 +193,9 @@ func NewStorageserver(master string, numnodes int, portnum int, nodeid uint32) *
 		<- ss.nodeMapM
 		ss.nodeMap[storageproto.Node{}] = 0 //someshithere}] = 0
 	}
+
+	ss.srpc = storagerpc.NewStorageRPC(ss)
+	rpc.Register(ss.srpc)
 
 	return ss
 }
@@ -373,6 +380,8 @@ func (ss *Storageserver) GetList(args *storageproto.GetArgs, reply *storageproto
 }
 
 func (ss *Storageserver) Put(args *storageproto.PutArgs, reply *storageproto.PutReply) error {
+
+	fmt.Println("called Put")
 
 	//if we are changing something that people have leases on we have to invalidate all leases
 	<- ss.leaseMapM
