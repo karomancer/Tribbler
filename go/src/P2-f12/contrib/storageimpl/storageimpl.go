@@ -27,10 +27,12 @@ import (
 	"math/rand"
 	"strings"
 	"fmt"
+	"log"
 )
 
 type Storageserver struct {
 	nodeid uint32
+	portnum int
 	isMaster bool
 	numNodes int
 	nodeList []storageproto.Node
@@ -107,6 +109,8 @@ func (ss *Storageserver) ClearCaches(clientKey string) {
 func NewStorageserver(master string, numnodes int, portnum int, nodeid uint32) *Storageserver {
 	ss := &Storageserver{}
 
+	ss.portnum = portnum
+
 	//if no nodeid is provided, choose one randomly
 	if nodeid == 0 {
 		reallySeedTheDamnRNG()
@@ -154,7 +158,6 @@ func NewStorageserver(master string, numnodes int, portnum int, nodeid uint32) *
 			//keep retrying until we can actually conenct
 			//(Master may not have started yet)
 			masterClient, err = rpc.DialHTTP("tcp", master)
-			fmt.Println("Trying to connect to master...")
 			time.Sleep(time.Duration(3)*time.Second)	
 		}
 
@@ -167,7 +170,6 @@ func NewStorageserver(master string, numnodes int, portnum int, nodeid uint32) *
 			//call register on the master node with our info as the args. Kinda weird
 			err = masterClient.Call("StorageRPC.Register", &args, &reply)
 			//keep retrying until all things are registered
-			fmt.Println("Trying to register with master...")
 			time.Sleep(time.Duration(3)*time.Second)	
 		}
 
@@ -176,6 +178,16 @@ func NewStorageserver(master string, numnodes int, portnum int, nodeid uint32) *
 		//spec is pretty vague...
 		<- ss.nodeListM
 		ss.nodeList = reply.Servers
+		log.Println("Successfully joined storage node cluster.")
+		slist := ""
+		for i := 0; i < len(ss.nodeList); i++ {
+			res := fmt.Sprintf("{localhost:%v %v}", ss.portnum, ss.nodeid)
+			slist += res
+			if i < len(ss.nodeList) - 1 {
+				slist += " "	
+			}
+		}
+		log.Printf("Server List: [%s]", slist)
 		ss.nodeListM <- 1
 
 		//non master doesn't keep a node map cause fuck you
@@ -203,7 +215,6 @@ func NewStorageserver(master string, numnodes int, portnum int, nodeid uint32) *
 	rpc.Register(ss.srpc)
 	go ss.GarbageCollector()
 
-	fmt.Println("Connected!")
 	return ss
 }
 
@@ -216,7 +227,6 @@ func (ss *Storageserver) RegisterServer(args *storageproto.RegisterArgs, reply *
 	//if not we have to add it to the map and to the list
 	if ok != true {
 		//put it in the list
-		fmt.Println("Hostport: %v, NodeID: %v\n", args.ServerInfo.HostPort, args.ServerInfo.NodeID)
 		<- ss.nodeListM
 		ss.nodeList = append(ss.nodeList, args.ServerInfo)
 		//put it in the map w/ it's index in the list just cause whatever bro
@@ -228,6 +238,16 @@ func (ss *Storageserver) RegisterServer(args *storageproto.RegisterArgs, reply *
 	if len(ss.nodeList) == ss.numNodes {
 		//if so we are ready
 		reply.Ready = true
+		log.Println("Successfully joined storage node cluster.")
+		slist := ""
+		for i := 0; i < len(ss.nodeList); i++ {
+			res := fmt.Sprintf("{localhost:%v %v}", ss.portnum, ss.nodeid)
+			slist += res
+			if i < len(ss.nodeList) - 1 {
+				slist += " "	
+			}
+		}
+		log.Printf("Server List: [%s]", slist)
 	} else {
 		//if not we aren't ready
 		reply.Ready = false
@@ -388,8 +408,6 @@ func (ss *Storageserver) GetList(args *storageproto.GetArgs, reply *storageproto
 }
 
 func (ss *Storageserver) Put(args *storageproto.PutArgs, reply *storageproto.PutReply) error {
-
-	fmt.Println("called Put")
 
 	//if we are changing something that people have leases on we have to invalidate all leases
 	<- ss.leaseMapM
