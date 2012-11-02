@@ -28,6 +28,8 @@ type Storageserver struct {
 	nodeListM chan int
 	nodeMap map[storageproto.Node]int
 	nodeMapM chan int
+	leaseMap map[string][]string //maps key to the clients who hold a lease on that key
+	leaseMapM chan int
 }
 
 func reallySeedTheDamnRNG() {
@@ -60,6 +62,10 @@ func NewStorageserver(master string, numnodes int, portnum int, nodeid uint32) *
 	ss.nodeMap = make(map[storageproto.Node]int)
 	ss.nodeMapM = make(chan int, 1)
 	ss.nodeMapM <- 1
+
+	ss.leaseMap = make(map[string][]string)
+	ss.leaseMapM = make(chan int, 1)
+	ss.leaseMapM <- 1
 
 	if ss.isMaster == false {
 		//connect to the master server
@@ -173,25 +179,126 @@ func (ss *Storageserver) GetServers(args *storageproto.GetServersArgs, reply *st
 	return nil
 }
 
+func (ss *Storageserver) revokeLeases(key string) bool {
+	//revokes all leases for a given key
+
+	//return true if/when all leases have been revoked properly (clients respond Status = OK)
+	//or maybe don't return anything cause loop until actually revoked?
+
+	//since we lock around all calls of this function we should not have to lock in the function itself (hopefully)
+	leaseList := ss.leaseMap[key]
+
+	for i := 0; i < len(leaseList); i++ {
+		//connect to each client holding the lease
+		cli, err := rpc.DialHTTP("tcp", leaseList[i])
+		if err != nil {
+			//fmt.Printf("Could not connect to server %s, returning nil\n", leaseList[i])
+			return false
+		}
+		//revoke the lease
+		args := &storageproto.RevokeLeaseArgs{}
+		args.Key = key
+		reply := &storageproto.RevokeLeaseReply{}
+
+		for reply.Status != storageproto.OK {
+			cli.Call("CacheRPC.RevokeLease", args, reply)
+			time.Sleep(2*time.Second)
+		}
+	} 
+
+	delete(ss.leaseMap, key)
+
+	return true
+}
+
 // RPC-able interfaces, bridged via StorageRPC.
 // These should do something! :-)
 
 func (ss *Storageserver) Get(args *storageproto.GetArgs, reply *storageproto.GetReply) error {
+
+	if args.WantLease == true {
+		//grant lease
+		//is there any reason to not grant it?
+		reply.Lease.Granted = true
+		reply.Lease.ValidSeconds = storageproto.LEASE_SECONDS
+		<- ss.leaseMapM
+		leaseList, exists := ss.leaseMap[args.Key]
+		if exists == true {
+			leaseList = append(leaseList, args.LeaseClient)
+		} else {
+			leaseList = []string{}
+			leaseList = append(leaseList, args.LeaseClient)
+		}
+		ss.leaseMap[args.Key] = leaseList
+		ss.leaseMapM <- 1
+	} else {
+		reply.Lease.Granted = false
+		reply.Lease.ValidSeconds = 0
+	}
+
 	return nil
 }
 
 func (ss *Storageserver) GetList(args *storageproto.GetArgs, reply *storageproto.GetListReply) error {
+
+	if args.WantLease == true {
+		//grant lease
+		//is there any reason to not grant it?
+		reply.Lease.Granted = true
+		reply.Lease.ValidSeconds = storageproto.LEASE_SECONDS
+		<- ss.leaseMapM
+		leaseList, exists := ss.leaseMap[args.Key]
+		if exists == true {
+			leaseList = append(leaseList, args.LeaseClient)
+		} else {
+			leaseList = []string{}
+			leaseList = append(leaseList, args.LeaseClient)
+		}
+		ss.leaseMap[args.Key] = leaseList
+		ss.leaseMapM <- 1
+	} else {
+		reply.Lease.Granted = false
+		reply.Lease.ValidSeconds = 0
+	}
+
 	return nil
 }
 
 func (ss *Storageserver) Put(args *storageproto.PutArgs, reply *storageproto.PutReply) error {
+
+	//if we are changing something that people have leases on we have to invalidate all leases
+	<- ss.leaseMapM
+	_, exists := ss.leaseMap[args.Key]
+	if exists == true {
+		ss.revokeLeases(args.Key)
+	}
+	ss.leaseMapM <- 1
+
 	return nil
 }
 
 func (ss *Storageserver) AppendToList(args *storageproto.PutArgs, reply *storageproto.PutReply) error {
+
+	//if we are changing something that people have leases on we have to invalidate all leases
+	<- ss.leaseMapM
+	_, exists := ss.leaseMap[args.Key]
+	if exists == true {
+		ss.revokeLeases(args.Key)
+	}
+	ss.leaseMapM <- 1
+
  	return nil
 }
 
 func (ss *Storageserver) RemoveFromList(args *storageproto.PutArgs, reply *storageproto.PutReply) error {
+
+	//if we are changing something that people have leases on we have to invalidate all leases
+	<- ss.leaseMapM
+	_, exists := ss.leaseMap[args.Key]
+	if exists == true {
+		ss.revokeLeases(args.Key)
+	}
+	ss.leaseMapM <- 1
+
  	return nil
 }
