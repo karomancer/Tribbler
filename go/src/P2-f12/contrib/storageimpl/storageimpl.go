@@ -24,6 +24,7 @@ import (
 	"time"
 	"net/rpc"
 	"math/rand"
+	"strings"
 )
 
 type Storageserver struct {
@@ -34,8 +35,16 @@ type Storageserver struct {
 	nodeListM chan int
 	nodeMap map[storageproto.Node]int
 	nodeMapM chan int
+	
+	//key -> client
+	//e.g. dga:7492ef010d -> host:port
 	leaseMap map[string][]string //maps key to the clients who hold a lease on that key
 	leaseMapM chan int
+
+	//client@key -> leaseTime
+	//e.g. host:port@dga:7492ef010d -> #nanoseconds
+	clientLeaseMap map[string]int64 //maps from client to timestamp when lease runs out
+	clientLeaseMapM chan int
 
 	listMap map[string][]string
 	listMapM chan int
@@ -47,6 +56,48 @@ type Storageserver struct {
 func reallySeedTheDamnRNG() {
 	randint, _ := crand.Int(crand.Reader, big.NewInt(math.MaxInt64))
 	rand.Seed( randint.Int64())
+}
+
+func (ss *Storageserver) GarbageCollector() {
+	for {
+		time.Sleep((storageproto.LEASE_SECONDS + storageproto.LEASE_GUARD_SECONDS)*time.Second)
+		now := time.Now().UnixNano()
+		<- ss.clientLeaseMapM
+		leases := ss.clientLeaseMap //don't want to be accessing leaseMap in a loop while blocking other processes
+		ss.clientLeaseMapM <- 1
+		for key, timestamp := range leases {
+			if now >= timestamp {	
+				ss.ClearCaches(key) 
+			}
+		}
+	}
+}
+
+func (ss *Storageserver) ClearCaches(clientKey string) {
+	keystring := strings.Split(clientKey, "@")
+	client := keystring[0]
+	key := keystring[1]
+
+	//delete client's lease from clientmap
+	<- ss.clientLeaseMapM 
+	delete(ss.clientLeaseMap, clientKey)
+	ss.clientLeaseMapM <- 1
+
+	//delete client from list of clients in leaseKey map
+	<- ss.leaseMapM
+	list := ss.leaseMap[key]
+	if len(list) == 1 {
+		delete(ss.leaseMap, key)
+		return
+	}
+	newlist := []string{}
+	for i:=0; i<len(list); i++ {
+		if list[i] != client {
+			newlist = append(newlist, list[i])
+		}
+	}
+	ss.leaseMap[key] = newlist
+	ss.leaseMapM <- 1
 }
 
 func NewStorageserver(master string, numnodes int, portnum int, nodeid uint32) *Storageserver {
@@ -79,6 +130,10 @@ func NewStorageserver(master string, numnodes int, portnum int, nodeid uint32) *
 	ss.leaseMapM = make(chan int, 1)
 	ss.leaseMapM <- 1
 
+	ss.clientLeaseMap = make(map[string]int64)
+	ss.clientLeaseMapM = make(chan int, 1)
+	ss.clientLeaseMapM <- 1
+
 	ss.listMap = make(map[string][]string)
 	ss.listMapM = make(chan int, 1)
 	ss.listMapM <- 1
@@ -89,8 +144,7 @@ func NewStorageserver(master string, numnodes int, portnum int, nodeid uint32) *
 
 	if ss.isMaster == false {
 		//connect to the master server
-		var masterClient *rpc.Client
-		var err error
+		masterClient, err := rpc.DialHTTP("tcp", master) 
 		for err != nil {
 			//keep retrying until we can actually conenct
 			//(Master may not have started yet)
@@ -99,13 +153,13 @@ func NewStorageserver(master string, numnodes int, portnum int, nodeid uint32) *
 		}
 
 		//set up args for registering ourselves
-		info := storageproto.Node{HostPort: ":" + strconv.Itoa(portnum), NodeID: nodeid}
+		info := storageproto.Node{HostPort: strconv.Itoa(portnum), NodeID: nodeid}
 		args := storageproto.RegisterArgs{ServerInfo: info}
 		reply := storageproto.RegisterReply{}
 
 		for err != nil || reply.Ready != true {
 			//call register on the master node with our info as the args. Kinda weird
-			err = masterClient.Call("StorageRPC.RegisterServer", args, reply)
+			err = masterClient.Call("StorageRPC.RegisterServer", &args, &reply)
 			//keep retrying until all things are registered
 			time.Sleep(time.Duration(3)*time.Second)	
 		}
@@ -251,6 +305,12 @@ func (ss *Storageserver) Get(args *storageproto.GetArgs, reply *storageproto.Get
 		}
 		ss.leaseMap[args.Key] = leaseList
 		ss.leaseMapM <- 1
+
+		<- ss.clientLeaseMapM
+		leaseExpiration := time.Now().Add((storageproto.LEASE_SECONDS+storageproto.LEASE_GUARD_SECONDS)*time.Second).UnixNano()
+		ss.clientLeaseMap[args.LeaseClient + "@" + args.Key] = leaseExpiration
+		ss.clientLeaseMapM <- 1 
+
 	} else {
 		reply.Lease.Granted = false
 		reply.Lease.ValidSeconds = 0
@@ -287,6 +347,12 @@ func (ss *Storageserver) GetList(args *storageproto.GetArgs, reply *storageproto
 		}
 		ss.leaseMap[args.Key] = leaseList
 		ss.leaseMapM <- 1
+
+		<- ss.clientLeaseMapM
+		leaseExpiration := time.Now().Add((storageproto.LEASE_SECONDS+storageproto.LEASE_GUARD_SECONDS)*time.Second).UnixNano()
+		ss.clientLeaseMap[args.LeaseClient + "@" + args.Key] = leaseExpiration
+		ss.clientLeaseMapM <- 1
+
 	} else {
 		reply.Lease.Granted = false
 		reply.Lease.ValidSeconds = 0
@@ -316,6 +382,10 @@ func (ss *Storageserver) Put(args *storageproto.PutArgs, reply *storageproto.Put
 	}
 	ss.leaseMapM <- 1
 
+	<- ss.valMapM
+	ss.valMap[args.Key] = args.Value
+	ss.valMapM <- 1
+
 	return nil
 }
 
@@ -329,6 +399,22 @@ func (ss *Storageserver) AppendToList(args *storageproto.PutArgs, reply *storage
 	}
 	ss.leaseMapM <- 1
 
+	<- ss.listMapM
+	list, ok := ss.listMap[args.Key]
+	if ok == false {
+		ss.listMap[args.Key] = []string{}
+	}
+
+	for i:=0; i<len(list); i++ {
+		if list[i] == args.Value {
+			reply.Status = storageproto.EITEMEXISTS
+			return nil
+		}
+	}
+	ss.listMap[args.Key] = append(ss.listMap[args.Key], args.Value)
+	ss.listMapM <- 1 
+
+	reply.Status = storageproto.OK
  	return nil
 }
 
@@ -342,5 +428,31 @@ func (ss *Storageserver) RemoveFromList(args *storageproto.PutArgs, reply *stora
 	}
 	ss.leaseMapM <- 1
 
+	<- ss.listMapM
+	list, ok := ss.listMap[args.Key]
+	if ok == false {
+		reply.Status = storageproto.EKEYNOTFOUND
+		return nil
+	}
+
+	j := -1
+	newlist := []string{}
+	for i:=0; i<len(list); i++ {
+		if list[i] == args.Value {
+			j = i
+		} else {
+			newlist = append(newlist, list[i])
+		}
+	}
+
+	if j == -1 {
+		reply.Status = storageproto.EITEMNOTFOUND
+		return nil
+	}
+
+	ss.listMap[args.Key] = newlist
+	ss.listMapM <- 1
+
+	reply.Status = storageproto.OK
  	return nil
 }
