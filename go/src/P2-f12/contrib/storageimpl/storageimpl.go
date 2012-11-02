@@ -9,6 +9,12 @@ package storageimpl
 // defined in the storagerpc StorageInterface interface.
 
 
+//TO DO
+//check each key if we are on the right server (rehash and check against our id, and other servers too since we have a list of all servers)
+//leaseTimer
+//other shits
+//like figure out what a server is supposed to print and stuff when it joins and things
+
 import (
 	"P2-f12/official/storageproto"
 	crand "crypto/rand"
@@ -30,6 +36,12 @@ type Storageserver struct {
 	nodeMapM chan int
 	leaseMap map[string][]string //maps key to the clients who hold a lease on that key
 	leaseMapM chan int
+
+	listMap map[string][]string
+	listMapM chan int
+
+	valMap map[string]string
+	valMapM chan int
 }
 
 func reallySeedTheDamnRNG() {
@@ -66,6 +78,14 @@ func NewStorageserver(master string, numnodes int, portnum int, nodeid uint32) *
 	ss.leaseMap = make(map[string][]string)
 	ss.leaseMapM = make(chan int, 1)
 	ss.leaseMapM <- 1
+
+	ss.listMap = make(map[string][]string)
+	ss.listMapM = make(chan int, 1)
+	ss.listMapM <- 1
+
+	ss.valMap = make(map[string]string)
+	ss.valMapM = make(chan int, 1)
+	ss.valMapM <- 1
 
 	if ss.isMaster == false {
 		//connect to the master server
@@ -236,6 +256,17 @@ func (ss *Storageserver) Get(args *storageproto.GetArgs, reply *storageproto.Get
 		reply.Lease.ValidSeconds = 0
 	}
 
+	<- ss.valMapM
+	val, ok := ss.valMap[args.Key]
+	if ok != true {
+		reply.Status = storageproto.EKEYNOTFOUND
+		reply.Value = ""
+	} else {
+		reply.Status = storageproto.OK
+		reply.Value = val
+	}
+	ss.valMapM <- 1
+
 	return nil
 }
 
@@ -260,6 +291,17 @@ func (ss *Storageserver) GetList(args *storageproto.GetArgs, reply *storageproto
 		reply.Lease.Granted = false
 		reply.Lease.ValidSeconds = 0
 	}
+
+	<- ss.listMapM
+	list, ok := ss.listMap[args.Key]
+	if ok != true {
+		reply.Status = storageproto.EITEMNOTFOUND
+		reply.Value = []string{}
+	} else {
+		reply.Status = storageproto.OK
+		reply.Value = list
+	}
+	ss.listMapM <- 1
 
 	return nil
 }
