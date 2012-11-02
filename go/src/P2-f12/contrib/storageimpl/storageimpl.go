@@ -17,6 +17,7 @@ package storageimpl
 
 import (
 	"P2-f12/official/storageproto"
+	"P2-f12/official/storagerpc"
 	crand "crypto/rand"
 	"math"
 	"strconv"
@@ -24,6 +25,7 @@ import (
 	"time"
 	"net/rpc"
 	"math/rand"
+	"fmt"
 	"strings"
 )
 
@@ -112,7 +114,7 @@ func NewStorageserver(master string, numnodes int, portnum int, nodeid uint32) *
 		ss.nodeid = nodeid
 	}
 
-	if numnodes != 0 && master == "" {
+	if numnodes != 0 {
 		ss.isMaster = true
 	} else {
 		ss.isMaster = false
@@ -143,17 +145,19 @@ func NewStorageserver(master string, numnodes int, portnum int, nodeid uint32) *
 	ss.valMapM <- 1
 
 	if ss.isMaster == false {
+		ss.numNodes = 0
 		//connect to the master server
 		masterClient, err := rpc.DialHTTP("tcp", master) 
 		for err != nil {
 			//keep retrying until we can actually conenct
 			//(Master may not have started yet)
 			masterClient, err = rpc.DialHTTP("tcp", master)
+			fmt.Println("Trying to connect to master...")
 			time.Sleep(time.Duration(3)*time.Second)	
 		}
 
 		//set up args for registering ourselves
-		info := storageproto.Node{HostPort: strconv.Itoa(portnum), NodeID: nodeid}
+		info := storageproto.Node{HostPort: ":" + strconv.Itoa(portnum), NodeID: nodeid}
 		args := storageproto.RegisterArgs{ServerInfo: info}
 		reply := storageproto.RegisterReply{}
 
@@ -161,6 +165,7 @@ func NewStorageserver(master string, numnodes int, portnum int, nodeid uint32) *
 			//call register on the master node with our info as the args. Kinda weird
 			err = masterClient.Call("StorageRPC.RegisterServer", &args, &reply)
 			//keep retrying until all things are registered
+			fmt.Println("Trying to register with master...")
 			time.Sleep(time.Duration(3)*time.Second)	
 		}
 
@@ -181,14 +186,17 @@ func NewStorageserver(master string, numnodes int, portnum int, nodeid uint32) *
 		if (numnodes == 0) {
 			numnodes = 1
 		}
-		ss.numNodes = numnodes;
+		ss.numNodes = numnodes
 		<- ss.nodeListM
 		//append self to nodeList and put self in map
-		ss.nodeList = append(ss.nodeList, storageproto.Node{})//some shit here})
+		me := storageproto.Node{HostPort: "localhost:" + strconv.Itoa(portnum), NodeID: nodeid}
+		ss.nodeList = append(ss.nodeList, me)//some shit here})
 		ss.nodeListM <- 1
 		<- ss.nodeMapM
-		ss.nodeMap[storageproto.Node{}] = 0 //someshithere}] = 0
+		ss.nodeMap[me] = 0 //someshithere}] = 0
 	}
+
+	go ss.GarbageCollector()
 
 	return ss
 }
