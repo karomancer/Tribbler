@@ -308,9 +308,11 @@ func (ss *Storageserver) revokeLeases(key string) bool {
 // These should do something! :-)
 
 func (ss *Storageserver) Get(args *storageproto.GetArgs, reply *storageproto.GetReply) error {
+
+	fmt.Println("called get")
+
 	<- ss.leaseMapM
-	list, exists := ss.leaseMap[args.Key]
-	ss.leaseMapM <- 1	
+	list, exists := ss.leaseMap[args.Key]	
 	
 	if exists == true {
 		fmt.Println("Lease exists!")
@@ -323,6 +325,8 @@ func (ss *Storageserver) Get(args *storageproto.GetArgs, reply *storageproto.Get
 			}
 		}
 	}
+	ss.leaseMapM <- 1
+
 
 	fmt.Println("Want lease? " + strconv.FormatBool(args.WantLease))
 	if args.WantLease == true {		
@@ -365,9 +369,11 @@ func (ss *Storageserver) Get(args *storageproto.GetArgs, reply *storageproto.Get
 }
 
 func (ss *Storageserver) GetList(args *storageproto.GetArgs, reply *storageproto.GetListReply) error {
+
+	fmt.Println("called getList")
+
 	<- ss.leaseMapM
 	list, exists := ss.leaseMap[args.Key]
-	ss.leaseMapM <- 1	
 	
 	if exists == true {
 		for i:=0; i < len(list); i++ {
@@ -377,6 +383,7 @@ func (ss *Storageserver) GetList(args *storageproto.GetArgs, reply *storageproto
 			}
 		}
 	}
+	ss.leaseMapM <- 1	
 
 	if args.WantLease == true {
 		//grant lease
