@@ -313,26 +313,27 @@ func (ss *Storageserver) Get(args *storageproto.GetArgs, reply *storageproto.Get
 	fmt.Println("called get")
 	fmt.Printf("key: %v\n", args.Key)
 
-	<- ss.leaseMapM
-	list, exists := ss.leaseMap[args.Key]	
-	
-	if exists == true {
-		fmt.Println("Lease exists!")
-		for i:=0; i < len(list); i++ {
-			fmt.Println("Client: " + args.LeaseClient + "\t, Leases: " + list[i])
-			if list[i] == args.LeaseClient {
-				fmt.Println("NO LEASE FOR YOU")
-				args.WantLease = false
-				break		
-			}
-		}
-	}
-	ss.leaseMapM <- 1
-
-
 	fmt.Println("Want lease? " + strconv.FormatBool(args.WantLease))
 	if args.WantLease == true {		
-		fmt.Println("want lease and don't have lease?")
+		<- ss.leaseMapM
+		list, exists := ss.leaseMap[args.Key]	
+		
+		if exists == true {
+			fmt.Println("Lease exists!")
+			for i:=0; i < len(list); i++ {
+				fmt.Println("Client: " + args.LeaseClient + "\t, Leases: " + list[i])
+				if list[i] == args.LeaseClient {
+					fmt.Println("NO LEASE FOR YOU")
+					reply.Status = storageproto.OK
+					<- ss.valMapM
+					reply.Value = ss.valMap[args.Key]
+					ss.valMapM <- 1
+					ss.leaseMapM <- 1
+					return nil	
+				}
+			}
+		}
+		ss.leaseMapM <- 1
 		//grant lease
 		//is there any reason to not grant it?
 		reply.Lease.Granted = true
