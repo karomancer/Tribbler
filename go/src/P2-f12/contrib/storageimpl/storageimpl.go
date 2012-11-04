@@ -51,6 +51,7 @@ type Storageserver struct {
 	listMap map[string][]string
 	listMapM chan int
 
+
 	valMap map[string]string
 	valMapM chan int
 
@@ -310,6 +311,7 @@ func (ss *Storageserver) revokeLeases(key string) bool {
 func (ss *Storageserver) Get(args *storageproto.GetArgs, reply *storageproto.GetReply) error {
 
 	fmt.Println("called get")
+	fmt.Printf("key: %v\n", args.Key)
 
 	<- ss.leaseMapM
 	list, exists := ss.leaseMap[args.Key]	
@@ -330,6 +332,7 @@ func (ss *Storageserver) Get(args *storageproto.GetArgs, reply *storageproto.Get
 
 	fmt.Println("Want lease? " + strconv.FormatBool(args.WantLease))
 	if args.WantLease == true {		
+		fmt.Println("want lease and don't have lease?")
 		//grant lease
 		//is there any reason to not grant it?
 		reply.Lease.Granted = true
@@ -371,11 +374,13 @@ func (ss *Storageserver) Get(args *storageproto.GetArgs, reply *storageproto.Get
 func (ss *Storageserver) GetList(args *storageproto.GetArgs, reply *storageproto.GetListReply) error {
 
 	fmt.Println("called getList")
+	fmt.Printf("key: %v\n", args.Key)
 
 	<- ss.leaseMapM
 	list, exists := ss.leaseMap[args.Key]
 	
 	if exists == true {
+		fmt.Println("have lease");
 		for i:=0; i < len(list); i++ {
 			if list[i] == args.LeaseClient {
 				args.WantLease = false
@@ -386,6 +391,7 @@ func (ss *Storageserver) GetList(args *storageproto.GetArgs, reply *storageproto
 	ss.leaseMapM <- 1	
 
 	if args.WantLease == true {
+		fmt.Println("dont' have lease and want lease")
 		//grant lease
 		//is there any reason to not grant it?
 		reply.Lease.Granted = true
