@@ -316,13 +316,13 @@ func (ss *Storageserver) Get(args *storageproto.GetArgs, reply *storageproto.Get
 	fmt.Println("Want lease? " + strconv.FormatBool(args.WantLease))
 	if args.WantLease == true {		
 		<- ss.leaseMapM
-		list, exists := ss.leaseMap[args.Key]	
+		_, exists := ss.leaseMap[args.Key]	
 		
 		if exists == true {
 			fmt.Println("Lease exists!")
-			for i:=0; i < len(list); i++ {
-				fmt.Println("Client: " + args.LeaseClient + "\t, Leases: " + list[i])
-				if list[i] == args.LeaseClient {
+			//for i:=0; i < len(list); i++ {
+				//fmt.Println("Client: " + args.LeaseClient + "\t, Leases: " + list[i])
+				//if list[i] == args.LeaseClient {
 					fmt.Println("NO LEASE FOR YOU")
 					reply.Status = storageproto.OK
 					<- ss.valMapM
@@ -330,8 +330,8 @@ func (ss *Storageserver) Get(args *storageproto.GetArgs, reply *storageproto.Get
 					ss.valMapM <- 1
 					ss.leaseMapM <- 1
 					return nil	
-				}
-			}
+				//}
+			//}
 		}
 		ss.leaseMapM <- 1
 		//grant lease
