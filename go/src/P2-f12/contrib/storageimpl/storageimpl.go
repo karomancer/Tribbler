@@ -45,6 +45,9 @@ type Storageserver struct {
 	leaseMap map[string][]string //maps key to the clients who hold a lease on that key
 	leaseMapM chan int
 
+	leaseMutexMap map[string]chan int
+	leaseMutexMapM chan int
+
 	//client@key -> leaseTime
 	//e.g. host:port@dga:7492ef010d -> #nanoseconds
 	clientLeaseMap map[string]int64 //maps from client to timestamp when lease runs out
@@ -71,7 +74,7 @@ func (ss *Storageserver) GarbageCollector() {
 		<- ss.clientLeaseMapM
 		leases := ss.clientLeaseMap //don't want to be accessing leaseMap in a loop while blocking other processes
 		ss.clientLeaseMapM <- 1
-		now := time.Now().UnixNano()
+		now = time.Now().UnixNano()
 		for key, timestamp := range leases {
 			if now > timestamp {	
 				ss.ClearCaches(key) 
@@ -143,6 +146,10 @@ func NewStorageserver(master string, numnodes int, portnum int, nodeid uint32) *
 	ss.leaseMap = make(map[string][]string)
 	ss.leaseMapM = make(chan int, 1)
 	ss.leaseMapM <- 1
+
+	ss.leaseMutexMap = make(map[string]chan int)
+	ss.leaseMutexMapM = make(chan int, 1)
+	ss.leaseMutexMapM <- 1
 
 	ss.clientLeaseMap = make(map[string]int64)
 	ss.clientLeaseMapM = make(chan int, 1)
@@ -316,7 +323,10 @@ func (ss *Storageserver) revokeLeases(key string) bool {
 	//return true if/when all leases have been revoked properly (clients respond Status = OK)
 	//or maybe don't return anything cause loop until actually revoked?
 
-	//since we lock around all calls of this function we should not have to lock in the function itself (hopefully)
+	<- ss.leaseMutexMapM
+	<- ss.leaseMutexMap[key]
+	ss.leaseMutexMapM <- 1
+
 	leaseList := ss.leaseMap[key]
 
 	for i := 0; i < len(leaseList); i++ {
@@ -347,6 +357,10 @@ func (ss *Storageserver) revokeLeases(key string) bool {
 	} 
 
 	delete(ss.leaseMap, key)
+
+	<- ss.leaseMutexMapM
+	ss.leaseMutexMap[key] <- 1
+	ss.leaseMutexMapM <- 1
 
 	return true
 }
@@ -387,6 +401,11 @@ func (ss *Storageserver) Get(args *storageproto.GetArgs, reply *storageproto.Get
 		}
 		ss.leaseMap[args.Key] = leaseList
 		ss.leaseMapM <- 1
+
+		<- ss.leaseMutexMapM
+		ss.leaseMutexMap[args.Key] = make(chan int, 1)
+		ss.leaseMutexMap[args.Key] <- 1
+		ss.leaseMutexMapM <- 1
 
 		<- ss.clientLeaseMapM
 		leaseExpiration := time.Now().Add((storageproto.LEASE_SECONDS+storageproto.LEASE_GUARD_SECONDS)*time.Second).UnixNano()
@@ -439,6 +458,11 @@ func (ss *Storageserver) GetList(args *storageproto.GetArgs, reply *storageproto
 		}
 		ss.leaseMap[args.Key] = list
 		ss.leaseMapM <- 1
+
+		<- ss.leaseMutexMapM
+		ss.leaseMutexMap[args.Key] = make(chan int, 1)
+		ss.leaseMutexMap[args.Key] <- 1
+		ss.leaseMutexMapM <- 1
 
 		<- ss.clientLeaseMapM
 		leaseExpiration := time.Now().Add((storageproto.LEASE_SECONDS+storageproto.LEASE_GUARD_SECONDS)*time.Second).UnixNano()
