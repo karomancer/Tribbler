@@ -54,6 +54,7 @@ type Storageserver struct {
 	listMap map[string][]string
 	listMapM chan int
 
+
 	valMap map[string]string
 	valMapM chan int
 
@@ -330,7 +331,7 @@ func (ss *Storageserver) revokeLeases(key string) bool {
 // These should do something! :-)
 
 func (ss *Storageserver) Get(args *storageproto.GetArgs, reply *storageproto.GetReply) error {
-	// fmt.Println("Want lease? " + strconv.FormatBool(args.WantLease))
+// fmt.Println("Want lease? " + strconv.FormatBool(args.WantLease))
 
 	<- ss.leaseMapM
 	list, exists := ss.leaseMap[args.Key]
@@ -347,8 +348,27 @@ func (ss *Storageserver) Get(args *storageproto.GetArgs, reply *storageproto.Get
 			}
 		}
 	}
-
+	
 	if args.WantLease == true {		
+		<- ss.leaseMapM
+		_, exists := ss.leaseMap[args.Key]	
+		
+		if exists == true {
+			fmt.Println("Lease exists!")
+			//for i:=0; i < len(list); i++ {
+				//fmt.Println("Client: " + args.LeaseClient + "\t, Leases: " + list[i])
+				//if list[i] == args.LeaseClient {
+					fmt.Println("NO LEASE FOR YOU")
+					reply.Status = storageproto.OK
+					<- ss.valMapM
+					reply.Value = ss.valMap[args.Key]
+					ss.valMapM <- 1
+					ss.leaseMapM <- 1
+					return nil	
+				//}
+			//}
+		}
+		ss.leaseMapM <- 1
 		//grant lease
 		//is there any reason to not grant it?
 		reply.Lease.Granted = true
@@ -389,11 +409,15 @@ func (ss *Storageserver) Get(args *storageproto.GetArgs, reply *storageproto.Get
 }
 
 func (ss *Storageserver) GetList(args *storageproto.GetArgs, reply *storageproto.GetListReply) error {
+
+	fmt.Println("called getList")
+	fmt.Printf("key: %v\n", args.Key)
+
 	<- ss.leaseMapM
 	list, exists := ss.leaseMap[args.Key]
-	ss.leaseMapM <- 1	
 	
 	if exists == true {
+		fmt.Println("have lease");
 		for i:=0; i < len(list); i++ {
 			if list[i] == args.LeaseClient {
 				args.WantLease = false
@@ -401,8 +425,10 @@ func (ss *Storageserver) GetList(args *storageproto.GetArgs, reply *storageproto
 			}
 		}
 	}
+	ss.leaseMapM <- 1	
 
 	if args.WantLease == true {
+		fmt.Println("dont' have lease and want lease")
 		//grant lease
 		//is there any reason to not grant it?
 		reply.Lease.Granted = true
