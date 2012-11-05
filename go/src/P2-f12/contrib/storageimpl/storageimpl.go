@@ -291,7 +291,7 @@ func (ss *Storageserver) GetServers(args *storageproto.GetServersArgs, reply *st
 	reply.Servers = ss.nodeList
 	fmt.Println("set reply to nodeList")
 	fmt.Printf("nodeList: \n")
-	slist := ""
+	/*slist := ""
 	for i := 0; i < len(ss.nodeList); i++ {
 		res := fmt.Sprintf("{localhost:%v %v}", ss.portnum, ss.nodeid)
 		slist += res
@@ -299,9 +299,11 @@ func (ss *Storageserver) GetServers(args *storageproto.GetServersArgs, reply *st
 			slist += " "	
 		}
 	}
-	log.Printf("Server List: [%s]", slist)
+	log.Printf("Server List: [%s]", slist)*/
 
 	ss.nodeListM <- 1
+
+	fmt.Println("sucessfully unlocked nodListM, returning nil")
 
 	return nil
 }
