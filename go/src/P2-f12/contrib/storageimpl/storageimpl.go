@@ -27,10 +27,12 @@ import (
 	"math/rand"
 	"strings"
 	"fmt"
+	"log"
 )
 
 type Storageserver struct {
 	nodeid uint32
+	portnum int
 	isMaster bool
 	numNodes int
 	nodeList []storageproto.Node
@@ -38,9 +40,6 @@ type Storageserver struct {
 	nodeMap map[storageproto.Node]int
 	nodeMapM chan int
 	
-	connCache map[string]*rpc.Client
-	connCacheM chan int
-
 	//key -> client
 	//e.g. dga:7492ef010d -> host:port
 	leaseMap map[string][]string //maps key to the clients who hold a lease on that key
@@ -68,7 +67,7 @@ func reallySeedTheDamnRNG() {
 
 func (ss *Storageserver) GarbageCollector() {
 	for {
-		time.Sleep((storageproto.LEASE_SECONDS)*time.Second)
+		time.Sleep((storageproto.LEASE_SECONDS + storageproto.LEASE_GUARD_SECONDS)*time.Second)
 		now := time.Now().UnixNano()
 		<- ss.clientLeaseMapM
 		leases := ss.clientLeaseMap //don't want to be accessing leaseMap in a loop while blocking other processes
@@ -121,6 +120,8 @@ func NewStorageserver(master string, numnodes int, portnum int, nodeid uint32) *
 		ss.nodeid = nodeid
 	}
 
+	ss.portnum = portnum
+
 	if numnodes != 0 {
 		ss.isMaster = true
 	} else {
@@ -142,10 +143,6 @@ func NewStorageserver(master string, numnodes int, portnum int, nodeid uint32) *
 	ss.clientLeaseMap = make(map[string]int64)
 	ss.clientLeaseMapM = make(chan int, 1)
 	ss.clientLeaseMapM <- 1
-
-	ss.connCache = make(map[string]*rpc.Client)
-	ss.connCacheM = make(chan int, 1)
-	ss.connCacheM <- 1
 
 	ss.listMap = make(map[string][]string)
 	ss.listMapM = make(chan int, 1)
@@ -185,6 +182,16 @@ func NewStorageserver(master string, numnodes int, portnum int, nodeid uint32) *
 		//spec is pretty vague...
 		<- ss.nodeListM
 		ss.nodeList = reply.Servers
+		log.Println("Successfully joined storage node cluster.")
+		slist := ""
+		for i := 0; i < len(ss.nodeList); i++ {
+			res := fmt.Sprintf("{localhost:%v %v}", ss.portnum, ss.nodeid)
+			slist += res
+			if i < len(ss.nodeList) - 1 {
+				slist += " "	
+			}
+		}
+		log.Printf("Server List: [%s]", slist)
 		ss.nodeListM <- 1
 
 		//non master doesn't keep a node map cause fuck you
@@ -235,6 +242,16 @@ func (ss *Storageserver) RegisterServer(args *storageproto.RegisterArgs, reply *
 	if len(ss.nodeList) == ss.numNodes {
 		//if so we are ready
 		reply.Ready = true
+		log.Println("Successfully joined storage node cluster.")
+		slist := ""
+		for i := 0; i < len(ss.nodeList); i++ {
+			res := fmt.Sprintf("{localhost:%v %v}", ss.portnum, ss.nodeid)
+			slist += res
+			if i < len(ss.nodeList) - 1 {
+				slist += " "	
+			}
+		}
+		log.Printf("Server List: [%s]", slist)
 	} else {
 		//if not we aren't ready
 		reply.Ready = false
@@ -256,19 +273,33 @@ func (ss *Storageserver) GetServers(args *storageproto.GetServersArgs, reply *st
 	//this is what libstore calls on the master to get a list of all the servers
 	//if the lenght of the nodeList is the number of nodes then we return ready and the list of nodes
 	//otherwise we return false for ready and the list of nodes we have so far
+	fmt.Println("called get servers")
 	<- ss.nodeListM
-
+	fmt.Println("locked nodeList Mutex sucessfully")
 	//check to see if all nodes have registered
 	if len(ss.nodeList) == ss.numNodes {
 		//if so we are ready
+		fmt.Println("we are ready")
 		reply.Ready = true
 	} else {
 		//if not we aren't ready
+		fmt.Println("we aren't ready")
 		reply.Ready = false
 	}
 
 	//send back the list of servers anyway
 	reply.Servers = ss.nodeList
+	fmt.Println("set reply to nodeList")
+	fmt.Printf("nodeList: \n")
+	slist := ""
+	for i := 0; i < len(ss.nodeList); i++ {
+		res := fmt.Sprintf("{localhost:%v %v}", ss.portnum, ss.nodeid)
+		slist += res
+		if i < len(ss.nodeList) - 1 {
+			slist += " "	
+		}
+	}
+	log.Printf("Server List: [%s]", slist)
 
 	ss.nodeListM <- 1
 
@@ -281,48 +312,33 @@ func (ss *Storageserver) revokeLeases(key string) bool {
 	//return true if/when all leases have been revoked properly (clients respond Status = OK)
 	//or maybe don't return anything cause loop until actually revoked?
 
-	<- ss.leaseMapM
+	//since we lock around all calls of this function we should not have to lock in the function itself (hopefully)
 	leaseList := ss.leaseMap[key]
-	ss.leaseMapM <- 1
 
-
-	var cli *rpc.Client
-	var exists bool
-	var err error
 	for i := 0; i < len(leaseList); i++ {
 		//connect to each client holding the lease
-		<- ss.connCacheM
-		cli, exists = ss.connCache[leaseList[i]]
-		if exists != true {
-			cli, err = rpc.DialHTTP("tcp", leaseList[i])
-			// fmt.Println("DIALING THE FUCK OUT OF HTTP! " + leaseList[i])
-			if err != nil {
-				fmt.Printf("Could not connect to server %s, returning nil\n", leaseList[i])
-				return false
-			}
-			ss.connCache[leaseList[i]] = cli
+		cli, err := rpc.DialHTTP("tcp", leaseList[i])
+		// fmt.Println("DIALING THE FUCK OUT OF HTTP! " + leaseList[i])
+		if err != nil {
+			fmt.Printf("Could not connect to server %s, returning nil\n", leaseList[i])
+			return false
 		}
-		ss.connCacheM <- 1
-		
 		//revoke the lease
-		args := storageproto.RevokeLeaseArgs{Key: key}
-		var reply storageproto.RevokeLeaseReply
-		status := -1
+		args := &storageproto.RevokeLeaseArgs{Key: key}
+		reply := &storageproto.RevokeLeaseReply{}
 
-		for status != storageproto.OK {
-			err := cli.Call("CacheRPC.RevokeLease", &args, &reply)
+		for reply.Status != storageproto.OK {
+			err = cli.Call("CacheRPC.RevokeLease", args, reply)
 			if err != nil {
 				fmt.Println("Could not revoke lease")
 				return false
-			}	
+			}
+			fmt.Println("Called CacheRPC revoke lease...")
 			time.Sleep(2*time.Second)
-			status = reply.Status
 		}
 	} 
 
-	<- ss.leaseMapM
 	delete(ss.leaseMap, key)
-	ss.leaseMapM <- 1
 
 	return true
 }
@@ -331,33 +347,20 @@ func (ss *Storageserver) revokeLeases(key string) bool {
 // These should do something! :-)
 
 func (ss *Storageserver) Get(args *storageproto.GetArgs, reply *storageproto.GetReply) error {
-// fmt.Println("Want lease? " + strconv.FormatBool(args.WantLease))
 
-	<- ss.leaseMapM
-	list, exists := ss.leaseMap[args.Key]
-	ss.leaseMapM <- 1	
-	
-	if exists == true {
-		// fmt.Println("Lease exists!")
-		for i:=0; i < len(list); i++ {
-			// fmt.Println("Client: " + args.LeaseClient + "\t, Leases: " + list[i])
-			if list[i] == args.LeaseClient {
-				// fmt.Println("NO LEASE FOR YOU")
-				args.WantLease = false
-				break		
-			}
-		}
-	}
-	
+	fmt.Println("called get")
+	fmt.Printf("key: %v\n", args.Key)
+
+	fmt.Println("Want lease? " + strconv.FormatBool(args.WantLease))
 	if args.WantLease == true {		
 		<- ss.leaseMapM
-		_, exists := ss.leaseMap[args.Key]	
+		list, exists := ss.leaseMap[args.Key]	
 		
 		if exists == true {
 			fmt.Println("Lease exists!")
-			//for i:=0; i < len(list); i++ {
-				//fmt.Println("Client: " + args.LeaseClient + "\t, Leases: " + list[i])
-				//if list[i] == args.LeaseClient {
+			for i:=0; i < len(list); i++ {
+				fmt.Println("Client: " + args.LeaseClient + "\t, Leases: " + list[i])
+				if list[i] == args.LeaseClient {
 					fmt.Println("NO LEASE FOR YOU")
 					reply.Status = storageproto.OK
 					<- ss.valMapM
@@ -365,8 +368,8 @@ func (ss *Storageserver) Get(args *storageproto.GetArgs, reply *storageproto.Get
 					ss.valMapM <- 1
 					ss.leaseMapM <- 1
 					return nil	
-				//}
-			//}
+				}
+			}
 		}
 		ss.leaseMapM <- 1
 		//grant lease
@@ -388,7 +391,6 @@ func (ss *Storageserver) Get(args *storageproto.GetArgs, reply *storageproto.Get
 		leaseExpiration := time.Now().Add((storageproto.LEASE_SECONDS+storageproto.LEASE_GUARD_SECONDS)*time.Second).UnixNano()
 		ss.clientLeaseMap[args.LeaseClient + "@" + args.Key] = leaseExpiration
 		ss.clientLeaseMapM <- 1 
-		fmt.Println("Granted Lease")
 	} else {
 		reply.Lease.Granted = false
 		reply.Lease.ValidSeconds = 0
@@ -472,13 +474,12 @@ func (ss *Storageserver) Put(args *storageproto.PutArgs, reply *storageproto.Put
 
 	//if we are changing something that people have leases on we have to invalidate all leases
 	<- ss.leaseMapM
-	// fmt.Println("Does it exist?")
 	_, exists := ss.leaseMap[args.Key]
-		ss.leaseMapM <- 1
 	if exists == true {
-		// fmt.Println("It exists!")
+		// fmt.Println("Revoke the things!")
 		ss.revokeLeases(args.Key)
 	}
+	ss.leaseMapM <- 1
 
 	<- ss.valMapM
 	ss.valMap[args.Key] = args.Value
@@ -494,12 +495,11 @@ func (ss *Storageserver) AppendToList(args *storageproto.PutArgs, reply *storage
 	<- ss.leaseMapM
 	//fmt.Println("Lock lease map!")
 	_, exists := ss.leaseMap[args.Key]
-	ss.leaseMapM <- 1
-
 	if exists == true {
 		//fmt.Println("SHIT EXISTS!")
 		ss.revokeLeases(args.Key)
 	}
+	ss.leaseMapM <- 1
 	//fmt.Println("Unlock lease map!")
 
 	//fmt.Println("Lock list map!")
