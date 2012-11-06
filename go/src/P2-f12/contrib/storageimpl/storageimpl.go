@@ -232,6 +232,8 @@ func NewStorageserver(master string, numnodes int, portnum int, nodeid uint32) *
 
 	fmt.Println("started new server")
 	fmt.Println(storageproto.Node{HostPort: "localhost:" + strconv.Itoa(portnum), NodeID: ss.nodeid})
+	fmt.Printf("master? %v\n", ss.isMaster)
+	fmt.Printf("numnodes? %v\n", ss.numNodes)
 
 	return ss
 }
