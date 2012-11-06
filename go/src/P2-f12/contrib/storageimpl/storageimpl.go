@@ -328,8 +328,14 @@ func Storehash(key string) uint32 {
 }
 
 func (ss *Storageserver) checkServer(key string) bool {
+
+	fmt.Println("called checkServer")
+	fmt.Printf("key: %v\n", key)
+
 	precolon := strings.Split(key, ":")[0]
 	keyid := Storehash(precolon)
+
+	fmt.Printf("keyid: %v\n", keyid)
 
 	if keyid >= ss.nodeid {
 		return false
