@@ -432,6 +432,7 @@ func (ss *Storageserver) Get(args *storageproto.GetArgs, reply *storageproto.Get
 	rightServer := ss.checkServer(args.Key)
 
 	if rightServer == false {
+		fmt.Println("wrong server Get")
 		reply.Status = storageproto.EWRONGSERVER
 		return nil
 	}
@@ -489,6 +490,8 @@ func (ss *Storageserver) Get(args *storageproto.GetArgs, reply *storageproto.Get
 		reply.Value = val
 	}
 	ss.valMapM <- 1
+
+	fmt.Printf("Get val for key %v: %v\n", args.Key, reply.Value)
 
 	return nil
 }
@@ -571,6 +574,7 @@ func (ss *Storageserver) Put(args *storageproto.PutArgs, reply *storageproto.Put
 	rightServer := ss.checkServer(args.Key)
 
 	if rightServer == false {
+		fmt.Println("wrong server Put")
 		reply.Status = storageproto.EWRONGSERVER
 		return nil
 	}
@@ -586,6 +590,10 @@ func (ss *Storageserver) Put(args *storageproto.PutArgs, reply *storageproto.Put
 	<- ss.valMapM
 	ss.valMap[args.Key] = args.Value
 	ss.valMapM <- 1
+
+	reply.Status = storageproto.OK
+
+	fmt.Printf("Put value %v for key %v\n", args.Value, args.Key)
 
 	return nil
 }
