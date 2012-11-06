@@ -336,6 +336,7 @@ func (ss *Storageserver) checkServer(key string) bool {
 	keyid := Storehash(precolon)
 
 	fmt.Printf("keyid: %v\n", keyid)
+	fmt.Printf("nodeid: %v\n", ss.nodeid)
 
 	if keyid >= ss.nodeid {
 		return false
