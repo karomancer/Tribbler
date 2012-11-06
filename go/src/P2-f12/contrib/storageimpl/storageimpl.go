@@ -118,7 +118,7 @@ func (ss *Storageserver) ClearCaches(clientKey string) {
 
 func NewStorageserver(master string, numnodes int, portnum int, nodeid uint32) *Storageserver {
 
-	fmt.Println("called new storage server")
+	//fmt.Println("called new storage server")
 
 	ss := &Storageserver{}
 
@@ -240,10 +240,10 @@ func NewStorageserver(master string, numnodes int, portnum int, nodeid uint32) *
 	rpc.Register(ss.srpc)
 	go ss.GarbageCollector()
 
-	fmt.Println("started new server")
+	/*fmt.Println("started new server")
 	fmt.Println(storageproto.Node{HostPort: "localhost:" + strconv.Itoa(portnum), NodeID: ss.nodeid})
 	fmt.Printf("master? %v\n", ss.isMaster)
-	fmt.Printf("numnodes? %v\n", ss.numNodes)
+	fmt.Printf("numnodes? %v\n", ss.numNodes)*/
 
 	return ss
 }
@@ -253,7 +253,7 @@ func (ss *Storageserver) RegisterServer(args *storageproto.RegisterArgs, reply *
 	//called on master by other servers
 	//first check if that server is alreayd in our map
 
-	fmt.Println("called register server")
+	//fmt.Println("called register server")
 
 	<- ss.nodeMapM
 	//fmt.Println("aquired nodeMap lock RegisterServer")
@@ -303,8 +303,8 @@ func (ss *Storageserver) RegisterServer(args *storageproto.RegisterArgs, reply *
 	//NOTE: having these two mutexes may cause weird problems, might want to look into just having one mutex that is used for both the 
 	//node list and the node map since they are baiscally the same thing anyway.
 
-	fmt.Println(reply.Servers)
-	fmt.Printf("ready? %v\n", reply.Ready)
+	//fmt.Println(reply.Servers)
+	//fmt.Printf("ready? %v\n", reply.Ready)
 
 	return nil
 }
@@ -313,7 +313,7 @@ func (ss *Storageserver) GetServers(args *storageproto.GetServersArgs, reply *st
 	//this is what libstore calls on the master to get a list of all the servers
 	//if the lenght of the nodeList is the number of nodes then we return ready and the list of nodes
 	//otherwise we return false for ready and the list of nodes we have so far
-	fmt.Println("called get servers")
+	//fmt.Println("called get servers")
 	<- ss.nodeListM
 	//fmt.Println("aquried nodelist lock GetServers")
 	//check to see if all nodes have registered
@@ -333,8 +333,8 @@ func (ss *Storageserver) GetServers(args *storageproto.GetServersArgs, reply *st
 	ss.nodeListM <- 1
 	//fmt.Println("released nodelist lock GetServers")
 
-	fmt.Println(reply.Servers)
-	fmt.Printf("ready? %v\n", reply.Ready)
+	//fmt.Println(reply.Servers)
+	//fmt.Printf("ready? %v\n", reply.Ready)
 
 	return nil
 }
@@ -347,17 +347,17 @@ func Storehash(key string) uint32 {
 
 func (ss *Storageserver) checkServer(key string) bool {
 
-	fmt.Println("called checkServer")
-	fmt.Printf("key: %v\n", key)
+	//fmt.Println("called checkServer")
+	//fmt.Printf("key: %v\n", key)
 
 	precolon := strings.Split(key, ":")[0]
 	keyid := Storehash(precolon)
 
-	fmt.Printf("keyid: %v\n", keyid)
-	fmt.Printf("nodeid: %v\n", ss.nodeid)
+	//fmt.Printf("keyid: %v\n", keyid)
+	//fmt.Printf("nodeid: %v\n", ss.nodeid)
 
 	if keyid > ss.nodeid {
-		fmt.Println("keyid is greater than node id!")
+		//fmt.Println("keyid is greater than node id!")
 
 		//but we might have wraparound!
 		greaterThanAll := true
@@ -393,13 +393,13 @@ func (ss *Storageserver) checkServer(key string) bool {
 
 	for i := 0; i < len(ss.nodeList); i++ {
 		if keyid <= ss.nodeList[i].NodeID && ss.nodeList[i].NodeID < ss.nodeid {
-			fmt.Println("keyid is less than a lesser nodeId!")
-			fmt.Printf("keyid: %v, nodeid: %v\n", keyid, ss.nodeList[i].NodeID)
+			//fmt.Println("keyid is less than a lesser nodeId!")
+			//fmt.Printf("keyid: %v, nodeid: %v\n", keyid, ss.nodeList[i].NodeID)
 			return false
 		}
 	}
 
-	fmt.Println("key is on the right server")
+	//fmt.Println("key is on the right server")
 
 	return true
 
@@ -411,8 +411,8 @@ func (ss *Storageserver) revokeLeases(key string) bool {
 	//return true if/when all leases have been revoked properly (clients respond Status = OK)
 	//or maybe don't return anything cause loop until actually revoked?
 
-	fmt.Println("called revokeLeases")
-	fmt.Printf("key: %v\n", key)
+	//fmt.Println("called revokeLeases")
+	//fmt.Printf("key: %v\n", key)
 
 	<- ss.leaseMutexMapM
 	<- ss.leaseMutexMap[key]
@@ -425,7 +425,7 @@ func (ss *Storageserver) revokeLeases(key string) bool {
 		cli, err := rpc.DialHTTP("tcp", leaseList[i])
 		// fmt.Println("DIALING THE FUCK OUT OF HTTP! " + leaseList[i])
 		if err != nil {
-			fmt.Printf("Could not connect to server %s, returning nil\n", leaseList[i])
+			//fmt.Printf("Could not connect to server %s, returning nil\n", leaseList[i])
 			return false
 		}
 		//revoke the lease
@@ -437,10 +437,10 @@ func (ss *Storageserver) revokeLeases(key string) bool {
 		for status != storageproto.OK && count > 0 {
 			err := cli.Call("CacheRPC.RevokeLease", &args, &reply)
 			if err != nil {
-				fmt.Println("Could not revoke lease")
+				//fmt.Println("Could not revoke lease")
 				return false
 			}
-			fmt.Println("Called CacheRPC revoke lease...")
+			//fmt.Println("Called CacheRPC revoke lease...")
 			time.Sleep(2*time.Second)
 			status = reply.Status
 			count--
@@ -461,13 +461,13 @@ func (ss *Storageserver) revokeLeases(key string) bool {
 
 func (ss *Storageserver) Get(args *storageproto.GetArgs, reply *storageproto.GetReply) error {
 
-	fmt.Println("called get")
-	fmt.Printf("key: %v\n", args.Key)
+	//fmt.Println("called get")
+	//fmt.Printf("key: %v\n", args.Key)
 
 	rightServer := ss.checkServer(args.Key)
 
 	if rightServer == false {
-		fmt.Println("wrong server Get")
+		//fmt.Println("wrong server Get")
 		reply.Status = storageproto.EWRONGSERVER
 		return nil
 	}
@@ -526,15 +526,15 @@ func (ss *Storageserver) Get(args *storageproto.GetArgs, reply *storageproto.Get
 	}
 	ss.valMapM <- 1
 
-	fmt.Printf("Get val for key %v: %v\n", args.Key, reply.Value)
+	//fmt.Printf("Get val for key %v: %v\n", args.Key, reply.Value)
 
 	return nil
 }
 
 func (ss *Storageserver) GetList(args *storageproto.GetArgs, reply *storageproto.GetListReply) error {
 
-	fmt.Println("called getList")
-	fmt.Printf("key: %v\n", args.Key)
+	//fmt.Println("called getList")
+	//fmt.Printf("key: %v\n", args.Key)
 
 	rightServer := ss.checkServer(args.Key)
 
@@ -603,13 +603,13 @@ func (ss *Storageserver) GetList(args *storageproto.GetArgs, reply *storageproto
 
 func (ss *Storageserver) Put(args *storageproto.PutArgs, reply *storageproto.PutReply) error {
 
-	fmt.Println("called put")
-	fmt.Printf("key: %v\n", args.Key)
+	//fmt.Println("called put")
+	//fmt.Printf("key: %v\n", args.Key)
 
 	rightServer := ss.checkServer(args.Key)
 
 	if rightServer == false {
-		fmt.Println("wrong server Put")
+		//fmt.Println("wrong server Put")
 		reply.Status = storageproto.EWRONGSERVER
 		return nil
 	}
@@ -628,7 +628,7 @@ func (ss *Storageserver) Put(args *storageproto.PutArgs, reply *storageproto.Put
 
 	reply.Status = storageproto.OK
 
-	fmt.Printf("Put value %v for key %v\n", args.Value, args.Key)
+	//fmt.Printf("Put value %v for key %v\n", args.Value, args.Key)
 
 	return nil
 }
@@ -636,8 +636,8 @@ func (ss *Storageserver) Put(args *storageproto.PutArgs, reply *storageproto.Put
 func (ss *Storageserver) AppendToList(args *storageproto.PutArgs, reply *storageproto.PutReply) error {
 	//fmt.Println("APPEND TO LIST!")
 
-	fmt.Println("called appendToList")
-	fmt.Printf("key: %v\n", args.Key)
+	//fmt.Println("called appendToList")
+	//fmt.Printf("key: %v\n", args.Key)
 
 	rightServer := ss.checkServer(args.Key)
 
@@ -678,8 +678,8 @@ func (ss *Storageserver) AppendToList(args *storageproto.PutArgs, reply *storage
 
 func (ss *Storageserver) RemoveFromList(args *storageproto.PutArgs, reply *storageproto.PutReply) error {
 
-	fmt.Println("called remove from List")
-	fmt.Printf("key: %v\n", args.Key)
+	//fmt.Println("called remove from List")
+	//fmt.Printf("key: %v\n", args.Key)
 
 	rightServer := ss.checkServer(args.Key)
 
