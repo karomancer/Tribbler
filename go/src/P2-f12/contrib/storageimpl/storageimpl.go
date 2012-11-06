@@ -356,12 +356,12 @@ func (ss *Storageserver) checkServer(key string) bool {
 	fmt.Printf("keyid: %v\n", keyid)
 	fmt.Printf("nodeid: %v\n", ss.nodeid)
 
-	if keyid >= ss.nodeid {
+	if keyid > ss.nodeid {
 		return false
 	}
 
 	for i := 0; i < len(ss.nodeList); i++ {
-		if keyid < ss.nodeList[i].NodeID && ss.nodeList[i].NodeID != ss.nodeid {
+		if keyid <= ss.nodeList[i].NodeID && ss.nodeList[i].NodeID <= ss.nodeid {
 			return false
 		}
 	}
