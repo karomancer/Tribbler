@@ -247,11 +247,13 @@ func (ss *Storageserver) RegisterServer(args *storageproto.RegisterArgs, reply *
 	fmt.Println("called register server")
 
 	<- ss.nodeMapM
+	fmt.Println("aquired nodeMap lock")
 	_, ok := ss.nodeMap[args.ServerInfo]
 	//if not we have to add it to the map and to the list
 	if ok != true {
 		//put it in the list
 		<- ss.nodeListM
+		fmt.Println("aquired nodeList lock")
 		ss.nodeList = append(ss.nodeList, args.ServerInfo)
 		//put it in the map w/ it's index in the list just cause whatever bro
 		//map is just easy way to check for duplicates anyway
@@ -282,7 +284,9 @@ func (ss *Storageserver) RegisterServer(args *storageproto.RegisterArgs, reply *
 
 	//unlock everything
 	ss.nodeListM <- 1
+	fmt.Println("released nodeList lock")
 	ss.nodeMapM <- 1
+	fmt.Println("released nodeMap lock")
 	//NOTE: having these two mutexes may cause weird problems, might want to look into just having one mutex that is used for both the 
 	//node list and the node map since they are baiscally the same thing anyway.
 
