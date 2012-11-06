@@ -362,8 +362,9 @@ func (ss *Storageserver) checkServer(key string) bool {
 	}
 
 	for i := 0; i < len(ss.nodeList); i++ {
-		if keyid <= ss.nodeList[i].NodeID && ss.nodeList[i].NodeID <= ss.nodeid {
+		if keyid <= ss.nodeList[i].NodeID && ss.nodeList[i].NodeID < ss.nodeid {
 			fmt.Println("keyid is less than a lesser nodeId!")
+			fmt.Printf("keyid: %v, nodeid: %v\n", keyid, ss.nodeList[i].NodeID)
 			return false
 		}
 	}
