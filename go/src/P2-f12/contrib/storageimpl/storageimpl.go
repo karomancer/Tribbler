@@ -28,6 +28,7 @@ import (
 	"strings"
 	"fmt"
 	"log"
+	"hash/fnv"
 )
 
 type Storageserver struct {
@@ -320,11 +321,38 @@ func (ss *Storageserver) GetServers(args *storageproto.GetServersArgs, reply *st
 	return nil
 }
 
+func Storehash(key string) uint32 {
+	hasher := fnv.New32()
+	hasher.Write([]byte(key))
+	return hasher.Sum32()
+}
+
+func (ss *Storageserver) checkServer(key string) bool {
+	precolon := strings.Split(key, ":")[0]
+	keyid := Storehash(precolon)
+
+	if keyid >= ss.nodeid {
+		return false
+	}
+
+	for i := 0; i < len(ss.nodeList); i++ {
+		if keyid < ss.nodeList[i].NodeID && ss.nodeList[i].NodeID != ss.nodeid {
+			return false
+		}
+	}
+
+	return true
+
+}
+
 func (ss *Storageserver) revokeLeases(key string) bool {
 	//revokes all leases for a given key
 
 	//return true if/when all leases have been revoked properly (clients respond Status = OK)
 	//or maybe don't return anything cause loop until actually revoked?
+
+	fmt.Println("called revokeLeases")
+	fmt.Printf("key: %v\n", key)
 
 	<- ss.leaseMutexMapM
 	<- ss.leaseMutexMap[key]
@@ -373,7 +401,15 @@ func (ss *Storageserver) revokeLeases(key string) bool {
 
 func (ss *Storageserver) Get(args *storageproto.GetArgs, reply *storageproto.GetReply) error {
 
-	// fmt.Println("Want lease? " + strconv.FormatBool(args.WantLease))
+	fmt.Println("called get")
+	fmt.Printf("key: %v\n", args.Key)
+
+	rightServer := ss.checkServer(args.Key)
+
+	if rightServer == false {
+		reply.Status = storageproto.EWRONGSERVER
+		return nil
+	}
 
 	<- ss.leaseMapM
 	list, exists := ss.leaseMap[args.Key]
@@ -382,7 +418,6 @@ func (ss *Storageserver) Get(args *storageproto.GetArgs, reply *storageproto.Get
 	if exists == true {
 		for i:=0; i < len(list); i++ {
 			if list[i] == args.LeaseClient {
-				// fmt.Println("NO LEASE FOR YOU")
 				args.WantLease = false
 				break		
 			}
@@ -434,6 +469,17 @@ func (ss *Storageserver) Get(args *storageproto.GetArgs, reply *storageproto.Get
 }
 
 func (ss *Storageserver) GetList(args *storageproto.GetArgs, reply *storageproto.GetListReply) error {
+
+	fmt.Println("called getList")
+	fmt.Printf("key: %v\n", args.Key)
+
+	rightServer := ss.checkServer(args.Key)
+
+	if rightServer == false {
+		reply.Status = storageproto.EWRONGSERVER
+		return nil
+	}
+
 	<- ss.leaseMapM
 	list, exists := ss.leaseMap[args.Key]
 	ss.leaseMapM <- 1	
@@ -494,6 +540,16 @@ func (ss *Storageserver) GetList(args *storageproto.GetArgs, reply *storageproto
 
 func (ss *Storageserver) Put(args *storageproto.PutArgs, reply *storageproto.PutReply) error {
 
+	fmt.Println("called put")
+	fmt.Printf("key: %v\n", args.Key)
+
+	rightServer := ss.checkServer(args.Key)
+
+	if rightServer == false {
+		reply.Status = storageproto.EWRONGSERVER
+		return nil
+	}
+
 	//if we are changing something that people have leases on we have to invalidate all leases
 	<- ss.leaseMapM
 	_, exists := ss.leaseMap[args.Key]
@@ -511,6 +567,16 @@ func (ss *Storageserver) Put(args *storageproto.PutArgs, reply *storageproto.Put
 
 func (ss *Storageserver) AppendToList(args *storageproto.PutArgs, reply *storageproto.PutReply) error {
 	//fmt.Println("APPEND TO LIST!")
+
+	fmt.Println("called appendToList")
+	fmt.Printf("key: %v\n", args.Key)
+
+	rightServer := ss.checkServer(args.Key)
+
+	if rightServer == false {
+		reply.Status = storageproto.EWRONGSERVER
+		return nil
+	}
 
 	//if we are changing something that people have leases on we have to invalidate all leases
 	<- ss.leaseMapM
@@ -543,7 +609,16 @@ func (ss *Storageserver) AppendToList(args *storageproto.PutArgs, reply *storage
 }
 
 func (ss *Storageserver) RemoveFromList(args *storageproto.PutArgs, reply *storageproto.PutReply) error {
-	// //fmt.Println("REMOVE FROM LIST!")
+
+	fmt.Println("called remove from List")
+	fmt.Printf("key: %v\n", args.Key)
+
+	rightServer := ss.checkServer(args.Key)
+
+	if rightServer == false {
+		reply.Status = storageproto.EWRONGSERVER
+		return nil
+	}
 
 	//if we are changing something that people have leases on we have to invalidate all leases
 	<- ss.leaseMapM
