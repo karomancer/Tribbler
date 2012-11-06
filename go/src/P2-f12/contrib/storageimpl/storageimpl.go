@@ -196,7 +196,7 @@ func NewStorageserver(master string, numnodes int, portnum int, nodeid uint32) *
 		//like get list of servers from reply maybe?
 		//spec is pretty vague...
 		<- ss.nodeListM
-		fmt.Println("Aquired nodeList lock NewStorageserver")
+		//fmt.Println("Aquired nodeList lock NewStorageserver")
 		ss.nodeList = reply.Servers
 		log.Println("Successfully joined storage node cluster.")
 		slist := ""
@@ -209,7 +209,7 @@ func NewStorageserver(master string, numnodes int, portnum int, nodeid uint32) *
 		}
 		log.Printf("Server List: [%s]", slist)
 		ss.nodeListM <- 1
-		fmt.Println("released nodeList lock NewStorageserver")
+		//fmt.Println("released nodeList lock NewStorageserver")
 
 		//non master doesn't keep a node map cause fuck you
 
@@ -223,17 +223,17 @@ func NewStorageserver(master string, numnodes int, portnum int, nodeid uint32) *
 		}
 		ss.numNodes = numnodes
 		<- ss.nodeListM
-		fmt.Println("aquired nodelist lock NewStorageserver")
+		//fmt.Println("aquired nodelist lock NewStorageserver")
 		//append self to nodeList and put self in map
 		me := storageproto.Node{HostPort: "localhost:" + strconv.Itoa(portnum), NodeID: ss.nodeid}
 		ss.nodeList = append(ss.nodeList, me)//some shit here})
 		ss.nodeListM <- 1
-		fmt.Println("released nodelist lock NewStorageserver")
+		//fmt.Println("released nodelist lock NewStorageserver")
 		<- ss.nodeMapM
-		fmt.Println("aquired nodeMap lock NewStorageserver")
+		//fmt.Println("aquired nodeMap lock NewStorageserver")
 		ss.nodeMap[me] = 0
 		ss.nodeMapM <- 1
-		fmt.Println("released nodeMap lock NewStorageserver")
+		//fmt.Println("released nodeMap lock NewStorageserver")
 	}
 
 	ss.srpc = storagerpc.NewStorageRPC(ss)
@@ -256,16 +256,16 @@ func (ss *Storageserver) RegisterServer(args *storageproto.RegisterArgs, reply *
 	fmt.Println("called register server")
 
 	<- ss.nodeMapM
-	fmt.Println("aquired nodeMap lock RegisterServer")
+	//fmt.Println("aquired nodeMap lock RegisterServer")
 	_, ok := ss.nodeMap[args.ServerInfo]
 	//if not we have to add it to the map and to the list
 	if ok != true {
 		//put it in the list
 		<- ss.nodeListM
-		fmt.Println("aquired nodeList lock RegisterServer")
+		//fmt.Println("aquired nodeList lock RegisterServer")
 		ss.nodeList = append(ss.nodeList, args.ServerInfo)
 		ss.nodeListM <- 1
-		fmt.Println("release nodeList lock RegisterServer")
+		//fmt.Println("release nodeList lock RegisterServer")
 		//put it in the map w/ it's index in the list just cause whatever bro
 		//map is just easy way to check for duplicates anyway
 		ss.nodeMap[args.ServerInfo] = len(ss.nodeList)
@@ -273,7 +273,7 @@ func (ss *Storageserver) RegisterServer(args *storageproto.RegisterArgs, reply *
 
 	//check to see if all nodes have registered
 	<- ss.nodeListM
-	fmt.Println("aquired nodeList lock RegisterServer")
+	//fmt.Println("aquired nodeList lock RegisterServer")
 	if len(ss.nodeList) == ss.numNodes {
 		//if so we are ready
 		reply.Ready = true
@@ -297,9 +297,9 @@ func (ss *Storageserver) RegisterServer(args *storageproto.RegisterArgs, reply *
 
 	//unlock everything
 	ss.nodeListM <- 1
-	fmt.Println("released nodeList lock RegisterServer")
+	//fmt.Println("released nodeList lock RegisterServer")
 	ss.nodeMapM <- 1
-	fmt.Println("released nodeMap lock RegisterServer")
+	//fmt.Println("released nodeMap lock RegisterServer")
 	//NOTE: having these two mutexes may cause weird problems, might want to look into just having one mutex that is used for both the 
 	//node list and the node map since they are baiscally the same thing anyway.
 
@@ -315,7 +315,7 @@ func (ss *Storageserver) GetServers(args *storageproto.GetServersArgs, reply *st
 	//otherwise we return false for ready and the list of nodes we have so far
 	fmt.Println("called get servers")
 	<- ss.nodeListM
-	fmt.Println("aquried nodelist lock GetServers")
+	//fmt.Println("aquried nodelist lock GetServers")
 	//check to see if all nodes have registered
 	if len(ss.nodeList) == ss.numNodes {
 		//if so we are ready
@@ -331,7 +331,7 @@ func (ss *Storageserver) GetServers(args *storageproto.GetServersArgs, reply *st
 	reply.Servers = ss.nodeList
 
 	ss.nodeListM <- 1
-	fmt.Println("released nodelist lock GetServers")
+	//fmt.Println("released nodelist lock GetServers")
 
 	fmt.Println(reply.Servers)
 	fmt.Printf("ready? %v\n", reply.Ready)
@@ -357,14 +357,18 @@ func (ss *Storageserver) checkServer(key string) bool {
 	fmt.Printf("nodeid: %v\n", ss.nodeid)
 
 	if keyid > ss.nodeid {
+		fmt.Println("keyid is greater than node id!")
 		return false
 	}
 
 	for i := 0; i < len(ss.nodeList); i++ {
 		if keyid <= ss.nodeList[i].NodeID && ss.nodeList[i].NodeID <= ss.nodeid {
+			fmt.Println("keyid is less than a lesser nodeId!")
 			return false
 		}
 	}
+
+	fmt.Println("key is on the right server")
 
 	return true
 
