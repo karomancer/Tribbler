@@ -57,6 +57,11 @@ type Storageserver struct {
 	clientLeaseMap map[string]int64 //maps from client to timestamp when lease runs out
 	clientLeaseMapM chan int
 
+	stopRevoke chan string
+
+	connMap map[string]*rpc.Client
+	connMapM chan int
+
 	listMap map[string][]string
 	listMapM chan int
 
@@ -69,6 +74,24 @@ type Storageserver struct {
 func reallySeedTheDamnRNG() {
 	randint, _ := crand.Int(crand.Reader, big.NewInt(math.MaxInt64))
 	rand.Seed( randint.Int64())
+}
+
+func (ss *Storageserver) PrintLeaseMap() {
+	fmt.Println("**** Lease keys: ")
+	<- ss.leaseMapM
+	stuff := ss.leaseMap
+	ss.leaseMapM <- 1
+	for k, leaseInfo := range stuff {
+		fmt.Printf("***\t%v:\t", k)
+		<- leaseInfo.Mutex
+		keys := *leaseInfo.ClientKeys
+		leaseInfo.Mutex <- 1 
+		for j:=0; j<len(keys); j++ {
+			fmt.Printf("%v\t", keys[j])
+		}
+		fmt.Println()
+	}  
+	fmt.Println()
 }
 
 func (ss *Storageserver) GarbageCollector() {
@@ -87,23 +110,6 @@ func (ss *Storageserver) GarbageCollector() {
 	}
 }
 
-func (ss *Storageserver) PrintLeaseMap() {
-	// fmt.Println("**** Lease keys: ")
-	// <- ss.leaseMapM
-	// stuff := ss.leaseMap
-	// ss.leaseMapM <- 1
-	// for k, leaseInfo := range stuff {
-	// 	fmt.Printf("***\t%v:\t", k)
-	// 	<- leaseInfo.Mutex
-	// 	keys := *leaseInfo.ClientKeys
-	// 	leaseInfo.Mutex <- 1 
-	// 	for j:=0; j<len(keys); j++ {
-	// 		fmt.Printf("%v\t", keys[j])
-	// 	}
-	// 	fmt.Println()
-	// }  
-}
-
 func (ss *Storageserver) ClearCaches(clientKey string) {
 	fmt.Println("**** Client key: " + clientKey)
 	ss.PrintLeaseMap()
@@ -117,20 +123,16 @@ func (ss *Storageserver) ClearCaches(clientKey string) {
 	delete(ss.clientLeaseMap, clientKey)
 	ss.clientLeaseMapM <- 1
 
+	ss.stopRevoke <- key
+
 	//delete client from list of clients in leaseKey map
 	<- ss.leaseMapM
-	leaseInfo, _ := ss.leaseMap[key]
+	leaseInfo, exists := ss.leaseMap[key]
 	ss.leaseMapM <- 1
 
-	//In case its in the middle of revocation, revocation prevails
-	fmt.Println("Before select...")
-	select {
-		case <- leaseInfo.Mutex:
-		case leaseInfo.Mutex <- 1:
-			<- leaseInfo.Mutex
-	}
-	fmt.Println("after select!")
+	if exists == false { return }
 
+	<- leaseInfo.Mutex
 	list := *leaseInfo.ClientKeys
 	leaseInfo.Mutex <- 1
 
@@ -150,6 +152,7 @@ func (ss *Storageserver) ClearCaches(clientKey string) {
 	<- leaseInfo.Mutex
 	leaseInfo.ClientKeys = &newlist
 	leaseInfo.Mutex <- 1
+
 }
 
 func NewStorageserver(master string, numnodes int, portnum int, nodeid uint32) *Storageserver {
@@ -188,9 +191,15 @@ func NewStorageserver(master string, numnodes int, portnum int, nodeid uint32) *
 	ss.clientLeaseMapM = make(chan int, 1)
 	ss.clientLeaseMapM <- 1
 
+	ss.stopRevoke = make(chan string, 1)
+
 	ss.listMap = make(map[string][]string)
 	ss.listMapM = make(chan int, 1)
 	ss.listMapM <- 1
+
+	ss.connMap = make(map[string]*rpc.Client)
+	ss.connMapM = make(chan int, 1)
+	ss.connMapM <- 1
 
 	ss.valMap = make(map[string]string)
 	ss.valMapM = make(chan int, 1)
@@ -350,6 +359,53 @@ func (ss *Storageserver) GetServers(args *storageproto.GetServersArgs, reply *st
 	return nil
 }
 
+
+func (ss *Storageserver) dialAndRPCRevoke(key string, hostport string) bool {
+	//connect to each client holding the lease
+	var cli *rpc.Client
+	var exists bool
+	var err error
+	
+	<- ss.connMapM 
+	cli, exists = ss.connMap[hostport]
+	ss.connMapM <- 1
+
+	if exists == false {
+		cli, err = rpc.DialHTTP("tcp", hostport)
+		if err != nil {
+			fmt.Printf("Could not connect to server %s, returning nil\n", hostport)
+			return false
+		}
+		<- ss.connMapM
+		ss.connMap[hostport] = cli
+		fmt.Println("Cached connection.")
+		ss.connMapM <- 1
+	} else {
+		fmt.Println("Connection was already cached! Whoopee!")
+	}
+	
+	//revoke the lease
+	args := storageproto.RevokeLeaseArgs{Key: key}
+	var reply storageproto.RevokeLeaseReply
+	count := 5
+	status := -1
+		for status != storageproto.OK && count > 0 {
+			err := cli.Call("CacheRPC.RevokeLease", &args, &reply)
+			if err != nil {
+				fmt.Println("Could not revoke lease")
+					return false
+			}
+			time.Sleep(2*time.Second)
+			status = reply.Status
+			count--
+		}
+	clientKey := hostport + "@" + key
+	<- ss.clientLeaseMapM
+	delete(ss.clientLeaseMap, clientKey)
+	ss.clientLeaseMapM <- 1
+	return true
+}
+
 func (ss *Storageserver) revokeLeases(key string) bool {
 	//revokes all leases for a given key
 
@@ -365,42 +421,24 @@ func (ss *Storageserver) revokeLeases(key string) bool {
 	leaseInfo.Mutex <- 1
 
 	for i := 0; i < len(leaseList); i++ {
+		fmt.Println("Select statement (in revoke leases)...")
 		select {
+			case expired := <- ss.stopRevoke:
+				fmt.Println("Received STOP REVOKE")
+				if leaseList[i] != expired {
+					<- leaseInfo.Mutex
+					ss.dialAndRPCRevoke(key, leaseList[i])
+					leaseInfo.Mutex <- 1
+				} else {
+					fmt.Printf("\n\n**HEYBROHEY. Stop the revoke to %v**\n\n", leaseList[i])
+				}
 			case <- leaseInfo.Mutex:
-				//connect to each client holding the lease
-				cli, err := rpc.DialHTTP("tcp", leaseList[i])
-				// fmt.Println("DIALING THE FUCK OUT OF HTTP! " + leaseList[i])
-				if err != nil {
-					fmt.Printf("Could not connect to server %s, returning nil\n", leaseList[i])
-					return false
-				}
-				//revoke the lease
-				args := storageproto.RevokeLeaseArgs{Key: key}
-				var reply storageproto.RevokeLeaseReply
-				count := 5
-				status := -1
-
-				for status != storageproto.OK && count > 0 {
-					err := cli.Call("CacheRPC.RevokeLease", &args, &reply)
-					if err != nil {
-						fmt.Println("Could not revoke lease")
-						return false
-					}
-					time.Sleep(2*time.Second)
-					status = reply.Status
-					count--
-				}
-				clientKey := leaseList[i] + "@" + key
-				<- ss.clientLeaseMapM
-				delete(ss.clientLeaseMap, clientKey)
-				ss.clientLeaseMapM <- 1
+				ss.dialAndRPCRevoke(key, leaseList[i])
+				leaseInfo.Mutex <- 1
 		default: 
-			time.Sleep(2*time.Second)
 		}
 		
 	} 
-
-	leaseInfo.Mutex <- 1
 
 	<- ss.leaseMapM
 	delete(ss.leaseMap, key)
@@ -415,14 +453,15 @@ func (ss *Storageserver) revokeLeases(key string) bool {
 func (ss *Storageserver) Get(args *storageproto.GetArgs, reply *storageproto.GetReply) error {
 	<- ss.leaseMapM
 	leaseInfo, exists := ss.leaseMap[args.Key]
-	ss.leaseMapM <- 1	
+	ss.leaseMapM <- 1
 
+	
 	if exists == true {
-		select {
-			case <- leaseInfo.Mutex:
-				args.WantLease = false
-				leaseInfo.Mutex <- 1
-			default:
+		list := *leaseInfo.ClientKeys
+		for i:=0; i<len(list); i++ {
+			if list[i] == args.LeaseClient {
+				args.WantLease = false	
+			}
 		}
 	}
 
@@ -435,7 +474,7 @@ func (ss *Storageserver) Get(args *storageproto.GetArgs, reply *storageproto.Get
 			<- leaseInfo.Mutex
 			*leaseInfo.ClientKeys = append(*leaseInfo.ClientKeys, args.LeaseClient)
 			leaseInfo.Mutex <- 1
-			fmt.Println("**GET added to lease list")
+			fmt.Printf("**GET added %v to %v lease list\n", args.LeaseClient, args.Key)
 			ss.PrintLeaseMap()
 		} else {
 			keys = []string{}
@@ -445,7 +484,7 @@ func (ss *Storageserver) Get(args *storageproto.GetArgs, reply *storageproto.Get
 			mutex <- 1
 			ss.leaseMap[args.Key] = &LeaseInfo{Mutex: mutex, ClientKeys: &keys}
 			ss.leaseMapM <- 1
-			fmt.Println("**GET added lease")
+			fmt.Printf("**GET added Lease %v to %v\n", args.LeaseClient, args.Key)
 			ss.PrintLeaseMap()
 		}
 
@@ -475,16 +514,18 @@ func (ss *Storageserver) Get(args *storageproto.GetArgs, reply *storageproto.Get
 func (ss *Storageserver) GetList(args *storageproto.GetArgs, reply *storageproto.GetListReply) error {
 	<- ss.leaseMapM
 	leaseInfo, exists := ss.leaseMap[args.Key]
-	ss.leaseMapM <- 1	
+	ss.leaseMapM <- 1
 
+	
 	if exists == true {
-		select {
-			case <- leaseInfo.Mutex:
-				args.WantLease = false
-				leaseInfo.Mutex <- 1
-			default:
+		list := *leaseInfo.ClientKeys
+		for i:=0; i<len(list); i++ {
+			if list[i] == args.LeaseClient {
+				args.WantLease = false	
+			}
 		}
-	}
+	}	
+
 
 	if args.WantLease == true {
 		//grant lease
@@ -495,7 +536,7 @@ func (ss *Storageserver) GetList(args *storageproto.GetArgs, reply *storageproto
 			<- leaseInfo.Mutex
 			*leaseInfo.ClientKeys = append(*leaseInfo.ClientKeys, args.LeaseClient)
 			leaseInfo.Mutex <- 1
-			fmt.Println("**GETLIST added to lease list")
+			fmt.Printf("**GETLIST added %v to %v lease list\n", args.LeaseClient, args.Key)
 			ss.PrintLeaseMap()
 		} else {
 			keys := []string{}
@@ -505,7 +546,7 @@ func (ss *Storageserver) GetList(args *storageproto.GetArgs, reply *storageproto
 			mutex <- 1
 			ss.leaseMap[args.Key] = &LeaseInfo{Mutex: mutex, ClientKeys: &keys}
 			ss.leaseMapM <- 1
-			fmt.Println("**GETLIST added lease")
+			fmt.Printf("**GETLIST added %v to %v lease list\n", args.LeaseClient, args.Key)
 			ss.PrintLeaseMap()
 		}
 
@@ -540,8 +581,7 @@ func (ss *Storageserver) Put(args *storageproto.PutArgs, reply *storageproto.Put
 	_, exists := ss.leaseMap[args.Key]
 	ss.leaseMapM <- 1
 
-	if exists == true {	
-		ss.revokeLeases(args.Key) } 		
+	if exists == true {	ss.revokeLeases(args.Key) } 		
 
 	<- ss.valMapM
 	ss.valMap[args.Key] = args.Value

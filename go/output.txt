@@ -1,0 +1,172 @@
+Starting testPutGet:
+**GET added Lease localhost:13254 to keyputget:1
+**** Lease keys: 
+***	keyputget:1:	localhost:13254	
+
+Starting testAppendGetRemoveList:
+Starting testUpdateWithoutLease:
+Starting testUpdateBeforeLeaseExpire:
+**GET added Lease localhost:13254 to revokekey:1
+**** Lease keys: 
+***	revokekey:1:	localhost:13254	
+***	keyputget:1:	localhost:13254	
+
+Select statement (in revoke leases)...
+Cached connection.
+Starting testUpdateAfterLeaseExpire:
+**GET added Lease localhost:13254 to revokekey:2
+**** Lease keys: 
+***	revokekey:2:	localhost:13254	
+***	keyputget:1:	localhost:13254	
+
+**** Client key: localhost:13254@keyputget:1
+**** Lease keys: 
+***	revokekey:2:	localhost:13254	
+***	keyputget:1:	localhost:13254	
+
+**** Client key: localhost:13254@revokekey:2
+**** Lease keys: 
+***	revokekey:2:	localhost:13254	
+
+Select statement (in revoke leases)...
+Connection was already cached! Whoopee!
+Starting testDelayedRevokeWithoutBlocking:
+**GET added Lease localhost:13254 to revokekey:3
+**** Lease keys: 
+***	revokekey:3:	localhost:13254	
+
+Select statement (in revoke leases)...
+Connection was already cached! Whoopee!
+Starting testDelayedRevokeWithLeaseRequest1:
+**GET added Lease localhost:13254 to revokekey:5
+**** Lease keys: 
+***	revokekey:5:	localhost:13254	
+
+Select statement (in revoke leases)...
+Received STOP REVOKE
+Connection was already cached! Whoopee!
+Starting testDelayedRevokeWithLeaseRequest2:
+**GET added Lease localhost:13254 to revokekey:15
+**** Lease keys: 
+***	revokekey:15:	localhost:13254	
+
+Select statement (in revoke leases)...
+Connection was already cached! Whoopee!
+Starting testDelayedRevokeWithUpdate1:
+**GET added Lease localhost:13254 to revokekey:6
+**** Lease keys: 
+***	revokekey:15:	**** Client key: localhost:13254@revokekey:15
+**** Lease keys: 
+***	revokekey:15:	localhost:13254	l***	revokekey:6
+***	revokekey:6:	localhost:13254	
+
+Select statement (in revoke leases)...
+Received STOP REVOKE
+Connection was already cached! Whoopee!
+Select statement (in revoke leases)...
+Received STOP REVOKE
+Connection was already cached! Whoopee!
+Starting testDelayedRevokeWithUpdate2:
+**GET added Lease localhost:13254 to revokekey:7
+**** Lease keys: 
+***	revokekey:7:	localhost:13254	
+
+Select statement (in revoke leases)...
+Connection was already cached! Whoopee!
+Starting testDelayedRevokeWithUpdate3:
+**GET added Lease localhost:13254 to revokekey:8
+**** Lease keys: 
+***	revokekey:8:	localhost:13254	
+***	revokekey:7:	**** Client key: localhost:13254@revokekey:7
+**** Lease keys: 
+***	revokekey:7:	localhost:13254	
+
+in revoke leases)...
+localhost:13254	
+***	revokekey:8:	localhost:13254	
+
+Select statement (in revoke leases)...
+Connection was already cached! Whoopee!
+Starting testUpdateListWithoutLease:
+Starting testUpdateListBeforeLeaseExpire:
+**GETLIST added localhost:13254 to revokelistkey:1 lease list
+**** Lease keys: 
+***	revokelistkey:1:	localhost:13254	
+***	revokekey:8:	**** Client key: localhost:13254@revokekey:8
+**** Lease keys: 
+***	revokelistkey:1:	localhost:13254	
+***	revokekey:8:	localhost:13254	
+
+Select statement (in revoke leases)...
+Received STOP REVOKE
+Connection was already cached! Whoopee!
+localhost:13254	
+
+Starting testUpdateListAfterLeaseExpire:
+**GETLIST added localhost:13254 to revokelistkey:2 lease list
+**** Lease keys: 
+***	revokelistkey:2:	localhost:13254	
+
+Select statement (in revoke leases)...
+Received STOP REVOKE
+Connection was already cached! Whoopee!
+Starting testDelayedRevokeListWithoutBlocking:
+**GETLIST added localhost:13254 to revokelistkey:3 lease list
+**** Lease keys: 
+***	revokelistkey:3:	localhost:13254	
+
+Select statement (in revoke leases)...
+Connection was already cached! Whoopee!
+Starting testDelayedRevokeListWithLeaseRequest1:
+**GETLIST added localhost:13254 to revokelistkey:5 lease list
+**** Lease keys: 
+***	revokelistkey:5:	localhost:13254	
+
+Select statement (in revoke leases)...
+Connection was already cached! Whoopee!
+Starting testDelayedRevokeListWithLeaseRequest2:
+**GETLIST added localhost:13254 to revokelistkey:15 lease list
+**** Lease keys: 
+***	revokelistkey:15:	localhost:13254	
+
+Select statement (in revoke leases)...
+Connection was already cached! Whoopee!
+Starting testDelayedRevokeListWithUpdate1:
+**GETLIST added localhost:13254 to revokelistkey:6 lease list
+**** Lease keys: 
+***	revokelistkey:6:	localhost:13254	
+***	revokelistkey:15:	**** Client key: localhost:13254@revokelistkey:15
+**** Lease keys: 
+***	revokelistkey:6:	localhost:13254	
+***	revokelistkey:15:	localhost:13254	
+
+Select statement (in revoke leases)...
+Received STOP REVOKE
+Connection was already cached! Whoopee!
+Select statement (in revoke leases)...
+Connection was already cached! Whoopee!
+Starting testDelayedRevokeListWithUpdate2:
+**GETLIST added localhost:13254 to revokelistkey:7 lease list
+**** Lease keys: 
+***	revokelistkey:7:	localhost:13254	
+
+Select statement (in revoke leases)...
+Connection was already cached! Whoopee!
+Starting testDelayedRevokeListWithUpdate3:
+**GETLIST added localhost:13254 to revokelistkey:8 lease list
+**** Lease keys: 
+***	revokelistkey:7:	**** Client key: localhost:13254@revokelistkey:7
+**** Lease keys: 
+***	revokelistkey:7:	localhost:13254	C***	revokelistkey:8:	localhost:13254	
+
+Select statement (in revoke leases)...
+Received STOP REVOKE
+Connection was already cached! Whoopee!
+Passed (10/22) tests
+Starting testInitStorageServers:
+called get servers
+locked nodeList Mutex sucessfully
+we aren't ready
+set reply to nodeList
+nodeList: 
+Passed (0/1) tests
