@@ -176,7 +176,7 @@ func NewStorageserver(master string, numnodes int, portnum int, nodeid uint32) *
 		}
 
 		//set up args for registering ourselves
-		info := storageproto.Node{HostPort: strconv.Itoa(portnum), NodeID: ss.nodeid}
+		info := storageproto.Node{HostPort: "localhost:" + strconv.Itoa(portnum), NodeID: ss.nodeid}
 		args := storageproto.RegisterArgs{ServerInfo: info}
 		reply := storageproto.RegisterReply{}
 
