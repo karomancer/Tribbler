@@ -358,6 +358,36 @@ func (ss *Storageserver) checkServer(key string) bool {
 
 	if keyid > ss.nodeid {
 		fmt.Println("keyid is greater than node id!")
+
+		//but we might have wraparound!
+		greaterThanAll := true
+		for i := 0; i < len(ss.nodeList); i++ {
+			if keyid < ss.nodeList[i].NodeID {
+				greaterThanAll = false
+			}
+		}
+
+		// if the key does need to be wrapped around, we need to make sure
+		// it goes to the right server still, so we need to make sure our node
+		// has the min node id, otherwise it's not the right one
+		if greaterThanAll == true {
+			lessThanAll := true
+			for i := 0; i < len(ss.nodeList); i++ {
+				if ss.nodeid > ss.nodeList[i].NodeID {
+					lessThanAll = false
+				}
+			}
+
+			//if it's not the least node id we have the wrong server
+			if lessThanAll == false {
+				return false
+			} else {
+				//otherwise we good
+				return true
+			}
+		}
+
+		// if the key doesn't need to be wrapped around, it's just in the wrong node
 		return false
 	}
 
