@@ -193,6 +193,7 @@ func NewStorageserver(master string, numnodes int, portnum int, nodeid uint32) *
 		//like get list of servers from reply maybe?
 		//spec is pretty vague...
 		<- ss.nodeListM
+		fmt.Println("Aquired nodeList lock")
 		ss.nodeList = reply.Servers
 		log.Println("Successfully joined storage node cluster.")
 		slist := ""
@@ -205,6 +206,7 @@ func NewStorageserver(master string, numnodes int, portnum int, nodeid uint32) *
 		}
 		log.Printf("Server List: [%s]", slist)
 		ss.nodeListM <- 1
+		fmt.Println("released nodeList lock")
 
 		//non master doesn't keep a node map cause fuck you
 
@@ -218,13 +220,17 @@ func NewStorageserver(master string, numnodes int, portnum int, nodeid uint32) *
 		}
 		ss.numNodes = numnodes
 		<- ss.nodeListM
+		fmt.Println("aquired nodelist lock")
 		//append self to nodeList and put self in map
 		me := storageproto.Node{HostPort: "localhost:" + strconv.Itoa(portnum), NodeID: ss.nodeid}
 		ss.nodeList = append(ss.nodeList, me)//some shit here})
 		ss.nodeListM <- 1
+		fmt.Println("released nodelist lock")
 		<- ss.nodeMapM
+		fmt.Println("aquired nodeMap lock")
 		ss.nodeMap[me] = 0 //someshithere}] = 0
 		ss.nodeMapM <- 1
+		fmt.Println("released nodelist lock")
 	}
 
 	ss.srpc = storagerpc.NewStorageRPC(ss)
@@ -302,7 +308,7 @@ func (ss *Storageserver) GetServers(args *storageproto.GetServersArgs, reply *st
 	//otherwise we return false for ready and the list of nodes we have so far
 	fmt.Println("called get servers")
 	<- ss.nodeListM
-	//fmt.Println("locked nodeList Mutex sucessfully")
+	fmt.Println("aquried nodelist lock")
 	//check to see if all nodes have registered
 	if len(ss.nodeList) == ss.numNodes {
 		//if so we are ready
@@ -318,6 +324,7 @@ func (ss *Storageserver) GetServers(args *storageproto.GetServersArgs, reply *st
 	reply.Servers = ss.nodeList
 
 	ss.nodeListM <- 1
+	fmt.Println("released nodelist lock")
 
 	fmt.Println(reply.Servers)
 	fmt.Printf("ready? %v\n", reply.Ready)
