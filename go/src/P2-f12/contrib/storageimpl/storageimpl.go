@@ -284,6 +284,7 @@ func (ss *Storageserver) RegisterServer(args *storageproto.RegisterArgs, reply *
 	//node list and the node map since they are baiscally the same thing anyway.
 
 	fmt.Println(reply.Servers)
+	fmt.Printf("ready? %v\n", reply.Ready)
 
 	return nil
 }
@@ -324,6 +325,7 @@ func (ss *Storageserver) GetServers(args *storageproto.GetServersArgs, reply *st
 	ss.nodeListM <- 1
 
 	fmt.Println(reply.Servers)
+	fmt.Printf("ready? %v\n", reply.Ready)
 
 	return nil
 }
