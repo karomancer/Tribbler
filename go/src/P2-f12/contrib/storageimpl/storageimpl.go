@@ -230,6 +230,9 @@ func NewStorageserver(master string, numnodes int, portnum int, nodeid uint32) *
 	rpc.Register(ss.srpc)
 	go ss.GarbageCollector()
 
+	fmt.Println("started new server")
+	fmt.Println(storageproto.Node{HostPort: "localhost:" + strconv.Itoa(portnum), NodeID: ss.nodeid})
+
 	return ss
 }
 
