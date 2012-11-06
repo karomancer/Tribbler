@@ -237,6 +237,9 @@ func NewStorageserver(master string, numnodes int, portnum int, nodeid uint32) *
 func (ss *Storageserver) RegisterServer(args *storageproto.RegisterArgs, reply *storageproto.RegisterReply) error {
 	//called on master by other servers
 	//first check if that server is alreayd in our map
+
+	fmt.Println("called register server")
+
 	<- ss.nodeMapM
 	_, ok := ss.nodeMap[args.ServerInfo]
 	//if not we have to add it to the map and to the list
@@ -277,6 +280,8 @@ func (ss *Storageserver) RegisterServer(args *storageproto.RegisterArgs, reply *
 	//NOTE: having these two mutexes may cause weird problems, might want to look into just having one mutex that is used for both the 
 	//node list and the node map since they are baiscally the same thing anyway.
 
+	fmt.Println(reply.Servers)
+
 	return nil
 }
 
@@ -284,7 +289,7 @@ func (ss *Storageserver) GetServers(args *storageproto.GetServersArgs, reply *st
 	//this is what libstore calls on the master to get a list of all the servers
 	//if the lenght of the nodeList is the number of nodes then we return ready and the list of nodes
 	//otherwise we return false for ready and the list of nodes we have so far
-	//fmt.Println("called get servers")
+	fmt.Println("called get servers")
 	<- ss.nodeListM
 	//fmt.Println("locked nodeList Mutex sucessfully")
 	//check to see if all nodes have registered
@@ -312,8 +317,10 @@ func (ss *Storageserver) GetServers(args *storageproto.GetServersArgs, reply *st
 	}
 	log.Printf("Server List: [%s]", slist)
 	*/
-	
+
 	ss.nodeListM <- 1
+
+	fmt.Println(reply.Servers)
 
 	return nil
 }
