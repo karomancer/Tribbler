@@ -103,14 +103,13 @@ func (ss *Storageserver) PrintLeaseMap() {
 }
 
 func (ss *Storageserver) GarbageCollector() {
+	time.Sleep((storageproto.LEASE_SECONDS)*time.Second)
 	for {
-		time.Sleep((storageproto.LEASE_SECONDS)*time.Second)
-		now := time.Now().UnixNano()
 		<- ss.clientLeaseMapM
 		leases := ss.clientLeaseMap //don't want to be accessing leaseMap in a loop while blocking other processes
 		ss.clientLeaseMapM <- 1
-		now = time.Now().UnixNano()
 		for key, timestamp := range leases {
+			now := time.Now().UnixNano()
 			if now > timestamp {	
 				ss.ClearCaches(key) 
 			}
@@ -120,7 +119,7 @@ func (ss *Storageserver) GarbageCollector() {
 
 func (ss *Storageserver) ClearCaches(clientKey string) {
 	// fmt.Println("**** Client key: " + clientKey)
-	ss.PrintLeaseMap()
+	fmt.Println("Lease " + clientKey + " expired.")
 
 	keystring := strings.Split(clientKey, "@")
 	client := keystring[0]
@@ -131,7 +130,7 @@ func (ss *Storageserver) ClearCaches(clientKey string) {
 	delete(ss.clientLeaseMap, clientKey)
 	ss.clientLeaseMapM <- 1
 
-	fmt.Println("Lease expired.")
+	
 
 	//delete client from list of clients in leaseKey map
 	<- ss.leaseMapM
@@ -146,6 +145,7 @@ func (ss *Storageserver) ClearCaches(clientKey string) {
 		<- ss.leaseMapM
 		delete(ss.leaseMap, key)
 		ss.leaseMapM <- 1
+		ss.PrintLeaseMap()
 		return
 	}
 
@@ -162,6 +162,7 @@ func (ss *Storageserver) ClearCaches(clientKey string) {
 	<- leaseInfo.Mutex
 	*leaseInfo.ClientLeases = newlist
 	leaseInfo.Mutex <- 1
+	ss.PrintLeaseMap()
 }
 
 func NewStorageserver(master string, numnodes int, portnum int, nodeid uint32) *Storageserver {
@@ -550,6 +551,7 @@ func (ss *Storageserver) revokeLeases(key string) {
 	go ss.collectResponses(key, len(leaseList), leaseInfo)
 
 	for i := 0; i < len(leaseList); i++ {
+		fmt.Println("Revoking " + leaseList[i].Client)
 		go ss.dialAndRPCRevoke(key, leaseInfo, leaseList[i])	
 	}
 
@@ -559,7 +561,7 @@ func (ss *Storageserver) revokeLeases(key string) {
 // These should do something! :-)
 
 func (ss *Storageserver) Get(args *storageproto.GetArgs, reply *storageproto.GetReply) error {
-	//fmt.Println("called get")
+	fmt.Println("called get")
 	//fmt.Printf("key: %v\n", args.Key)
 
 	rightServer := ss.checkServer(args.Key)
@@ -713,7 +715,7 @@ func (ss *Storageserver) GetList(args *storageproto.GetArgs, reply *storageproto
 }
 
 func (ss *Storageserver) Put(args *storageproto.PutArgs, reply *storageproto.PutReply) error {
-	//fmt.Println("called put")
+	fmt.Println("called put")
 	//fmt.Printf("key: %v\n", args.Key)
 
 	rightServer := ss.checkServer(args.Key)
