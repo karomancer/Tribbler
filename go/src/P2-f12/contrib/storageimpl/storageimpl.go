@@ -28,6 +28,7 @@ import (
 	"strings"
 	"fmt"
 	"log"
+	"hash/fnv"
 )
 
 
@@ -77,21 +78,21 @@ func reallySeedTheDamnRNG() {
 }
 
 func (ss *Storageserver) PrintLeaseMap() {
-	fmt.Println("**** Lease keys: ")
-	<- ss.leaseMapM
-	stuff := ss.leaseMap
-	ss.leaseMapM <- 1
-	for k, leaseInfo := range stuff {
-		fmt.Printf("***\t%v:\t", k)
-		<- leaseInfo.Mutex
-		keys := *leaseInfo.ClientKeys
-		leaseInfo.Mutex <- 1 
-		for j:=0; j<len(keys); j++ {
-			fmt.Printf("%v\t", keys[j])
-		}
-		fmt.Println()
-	}  
-	fmt.Println()
+	// fmt.Println("**** Lease keys: ")
+	// <- ss.leaseMapM
+	// stuff := ss.leaseMap
+	// ss.leaseMapM <- 1
+	// for k, leaseInfo := range stuff {
+	// 	fmt.Printf("***\t%v:\t", k)
+	// 	<- leaseInfo.Mutex
+	// 	keys := *leaseInfo.ClientKeys
+	// 	leaseInfo.Mutex <- 1 
+	// 	for j:=0; j<len(keys); j++ {
+	// 		fmt.Printf("%v\t", keys[j])
+	// 	}
+	// 	fmt.Println()
+	// }  
+	// fmt.Println()
 }
 
 func (ss *Storageserver) GarbageCollector() {
@@ -111,7 +112,7 @@ func (ss *Storageserver) GarbageCollector() {
 }
 
 func (ss *Storageserver) ClearCaches(clientKey string) {
-	fmt.Println("**** Client key: " + clientKey)
+	// fmt.Println("**** Client key: " + clientKey)
 	ss.PrintLeaseMap()
 
 	keystring := strings.Split(clientKey, "@")
@@ -156,6 +157,9 @@ func (ss *Storageserver) ClearCaches(clientKey string) {
 }
 
 func NewStorageserver(master string, numnodes int, portnum int, nodeid uint32) *Storageserver {
+
+	//fmt.Println("called new storage server")
+
 	ss := &Storageserver{}
 
 	//if no nodeid is provided, choose one randomly
@@ -218,7 +222,7 @@ func NewStorageserver(master string, numnodes int, portnum int, nodeid uint32) *
 		}
 
 		//set up args for registering ourselves
-		info := storageproto.Node{HostPort: strconv.Itoa(portnum), NodeID: ss.nodeid}
+		info := storageproto.Node{HostPort: "localhost:" + strconv.Itoa(portnum), NodeID: ss.nodeid}
 		args := storageproto.RegisterArgs{ServerInfo: info}
 		reply := storageproto.RegisterReply{}
 
@@ -234,6 +238,7 @@ func NewStorageserver(master string, numnodes int, portnum int, nodeid uint32) *
 		//like get list of servers from reply maybe?
 		//spec is pretty vague...
 		<- ss.nodeListM
+		//fmt.Println("Aquired nodeList lock NewStorageserver")
 		ss.nodeList = reply.Servers
 		log.Println("Successfully joined storage node cluster.")
 		slist := ""
@@ -246,6 +251,7 @@ func NewStorageserver(master string, numnodes int, portnum int, nodeid uint32) *
 		}
 		log.Printf("Server List: [%s]", slist)
 		ss.nodeListM <- 1
+		//fmt.Println("released nodeList lock NewStorageserver")
 
 		//non master doesn't keep a node map cause fuck you
 
@@ -259,18 +265,27 @@ func NewStorageserver(master string, numnodes int, portnum int, nodeid uint32) *
 		}
 		ss.numNodes = numnodes
 		<- ss.nodeListM
+		//fmt.Println("aquired nodelist lock NewStorageserver")
 		//append self to nodeList and put self in map
 		me := storageproto.Node{HostPort: "localhost:" + strconv.Itoa(portnum), NodeID: ss.nodeid}
 		ss.nodeList = append(ss.nodeList, me)//some shit here})
 		ss.nodeListM <- 1
+		//fmt.Println("released nodelist lock NewStorageserver")
 		<- ss.nodeMapM
-		ss.nodeMap[me] = 0 //someshithere}] = 0
+		//fmt.Println("aquired nodeMap lock NewStorageserver")
+		ss.nodeMap[me] = 0
 		ss.nodeMapM <- 1
+		//fmt.Println("released nodeMap lock NewStorageserver")
 	}
 
 	ss.srpc = storagerpc.NewStorageRPC(ss)
 	rpc.Register(ss.srpc)
 	go ss.GarbageCollector()
+
+	/*fmt.Println("started new server")
+	fmt.Println(storageproto.Node{HostPort: "localhost:" + strconv.Itoa(portnum), NodeID: ss.nodeid})
+	fmt.Printf("master? %v\n", ss.isMaster)
+	fmt.Printf("numnodes? %v\n", ss.numNodes)*/
 
 	return ss
 }
@@ -279,19 +294,28 @@ func NewStorageserver(master string, numnodes int, portnum int, nodeid uint32) *
 func (ss *Storageserver) RegisterServer(args *storageproto.RegisterArgs, reply *storageproto.RegisterReply) error {
 	//called on master by other servers
 	//first check if that server is alreayd in our map
+
+	//fmt.Println("called register server")
+
 	<- ss.nodeMapM
+	//fmt.Println("aquired nodeMap lock RegisterServer")
 	_, ok := ss.nodeMap[args.ServerInfo]
 	//if not we have to add it to the map and to the list
 	if ok != true {
 		//put it in the list
 		<- ss.nodeListM
+		//fmt.Println("aquired nodeList lock RegisterServer")
 		ss.nodeList = append(ss.nodeList, args.ServerInfo)
+		ss.nodeListM <- 1
+		//fmt.Println("release nodeList lock RegisterServer")
 		//put it in the map w/ it's index in the list just cause whatever bro
 		//map is just easy way to check for duplicates anyway
 		ss.nodeMap[args.ServerInfo] = len(ss.nodeList)
 	} 
 
 	//check to see if all nodes have registered
+	<- ss.nodeListM
+	//fmt.Println("aquired nodeList lock RegisterServer")
 	if len(ss.nodeList) == ss.numNodes {
 		//if so we are ready
 		reply.Ready = true
@@ -315,9 +339,14 @@ func (ss *Storageserver) RegisterServer(args *storageproto.RegisterArgs, reply *
 
 	//unlock everything
 	ss.nodeListM <- 1
+	//fmt.Println("released nodeList lock RegisterServer")
 	ss.nodeMapM <- 1
+	//fmt.Println("released nodeMap lock RegisterServer")
 	//NOTE: having these two mutexes may cause weird problems, might want to look into just having one mutex that is used for both the 
 	//node list and the node map since they are baiscally the same thing anyway.
+
+	//fmt.Println(reply.Servers)
+	//fmt.Printf("ready? %v\n", reply.Ready)
 
 	return nil
 }
@@ -326,37 +355,96 @@ func (ss *Storageserver) GetServers(args *storageproto.GetServersArgs, reply *st
 	//this is what libstore calls on the master to get a list of all the servers
 	//if the lenght of the nodeList is the number of nodes then we return ready and the list of nodes
 	//otherwise we return false for ready and the list of nodes we have so far
-	fmt.Println("called get servers")
+	//fmt.Println("called get servers")
 	<- ss.nodeListM
-	fmt.Println("locked nodeList Mutex sucessfully")
+	//fmt.Println("aquried nodelist lock GetServers")
 	//check to see if all nodes have registered
 	if len(ss.nodeList) == ss.numNodes {
 		//if so we are ready
-		fmt.Println("we are ready")
+		//fmt.Println("we are ready")
 		reply.Ready = true
 	} else {
 		//if not we aren't ready
-		fmt.Println("we aren't ready")
+		//fmt.Println("we aren't ready")
 		reply.Ready = false
 	}
 
 	//send back the list of servers anyway
 	reply.Servers = ss.nodeList
-	fmt.Println("set reply to nodeList")
-	fmt.Printf("nodeList: \n")
-	slist := ""
-	for i := 0; i < len(ss.nodeList); i++ {
-		res := fmt.Sprintf("{localhost:%v %v}", ss.portnum, ss.nodeid)
-		slist += res
-		if i < len(ss.nodeList) - 1 {
-			slist += " "	
-		}
-	}
-	log.Printf("Server List: [%s]", slist)
 
 	ss.nodeListM <- 1
+	//fmt.Println("released nodelist lock GetServers")
+
+	//fmt.Println(reply.Servers)
+	//fmt.Printf("ready? %v\n", reply.Ready)
 
 	return nil
+}
+
+func Storehash(key string) uint32 {
+	hasher := fnv.New32()
+	hasher.Write([]byte(key))
+	return hasher.Sum32()
+}
+
+func (ss *Storageserver) checkServer(key string) bool {
+
+	//fmt.Println("called checkServer")
+	//fmt.Printf("key: %v\n", key)
+
+	precolon := strings.Split(key, ":")[0]
+	keyid := Storehash(precolon)
+
+	//fmt.Printf("keyid: %v\n", keyid)
+	//fmt.Printf("nodeid: %v\n", ss.nodeid)
+
+	if keyid > ss.nodeid {
+		//fmt.Println("keyid is greater than node id!")
+
+		//but we might have wraparound!
+		greaterThanAll := true
+		for i := 0; i < len(ss.nodeList); i++ {
+			if keyid < ss.nodeList[i].NodeID {
+				greaterThanAll = false
+			}
+		}
+
+		// if the key does need to be wrapped around, we need to make sure
+		// it goes to the right server still, so we need to make sure our node
+		// has the min node id, otherwise it's not the right one
+		if greaterThanAll == true {
+			lessThanAll := true
+			for i := 0; i < len(ss.nodeList); i++ {
+				if ss.nodeid > ss.nodeList[i].NodeID {
+					lessThanAll = false
+				}
+			}
+
+			//if it's not the least node id we have the wrong server
+			if lessThanAll == false {
+				return false
+			} else {
+				//otherwise we good
+				return true
+			}
+		}
+
+		// if the key doesn't need to be wrapped around, it's just in the wrong node
+		return false
+	}
+
+	for i := 0; i < len(ss.nodeList); i++ {
+		if keyid <= ss.nodeList[i].NodeID && ss.nodeList[i].NodeID < ss.nodeid {
+			//fmt.Println("keyid is less than a lesser nodeId!")
+			//fmt.Printf("keyid: %v, nodeid: %v\n", keyid, ss.nodeList[i].NodeID)
+			return false
+		}
+	}
+
+	//fmt.Println("key is on the right server")
+
+	return true
+
 }
 
 
@@ -378,11 +466,8 @@ func (ss *Storageserver) dialAndRPCRevoke(key string, hostport string) bool {
 		}
 		<- ss.connMapM
 		ss.connMap[hostport] = cli
-		fmt.Println("Cached connection.")
 		ss.connMapM <- 1
-	} else {
-		fmt.Println("Connection was already cached! Whoopee!")
-	}
+	} 
 	
 	//revoke the lease
 	args := storageproto.RevokeLeaseArgs{Key: key}
@@ -421,7 +506,6 @@ func (ss *Storageserver) revokeLeases(key string) bool {
 	leaseInfo.Mutex <- 1
 
 	for i := 0; i < len(leaseList); i++ {
-		fmt.Println("Select statement (in revoke leases)...")
 		select {
 			case expired := <- ss.stopRevoke:
 				fmt.Println("Received STOP REVOKE")
@@ -429,8 +513,6 @@ func (ss *Storageserver) revokeLeases(key string) bool {
 					<- leaseInfo.Mutex
 					ss.dialAndRPCRevoke(key, leaseList[i])
 					leaseInfo.Mutex <- 1
-				} else {
-					fmt.Printf("\n\n**HEYBROHEY. Stop the revoke to %v**\n\n", leaseList[i])
 				}
 			case <- leaseInfo.Mutex:
 				ss.dialAndRPCRevoke(key, leaseList[i])
@@ -451,6 +533,17 @@ func (ss *Storageserver) revokeLeases(key string) bool {
 // These should do something! :-)
 
 func (ss *Storageserver) Get(args *storageproto.GetArgs, reply *storageproto.GetReply) error {
+	//fmt.Println("called get")
+	//fmt.Printf("key: %v\n", args.Key)
+
+	rightServer := ss.checkServer(args.Key)
+
+	if rightServer == false {
+		//fmt.Println("wrong server Get")
+		reply.Status = storageproto.EWRONGSERVER
+		return nil
+	}
+
 	<- ss.leaseMapM
 	leaseInfo, exists := ss.leaseMap[args.Key]
 	ss.leaseMapM <- 1
@@ -461,6 +554,7 @@ func (ss *Storageserver) Get(args *storageproto.GetArgs, reply *storageproto.Get
 		for i:=0; i<len(list); i++ {
 			if list[i] == args.LeaseClient {
 				args.WantLease = false	
+				break		
 			}
 		}
 	}
@@ -474,7 +568,7 @@ func (ss *Storageserver) Get(args *storageproto.GetArgs, reply *storageproto.Get
 			<- leaseInfo.Mutex
 			*leaseInfo.ClientKeys = append(*leaseInfo.ClientKeys, args.LeaseClient)
 			leaseInfo.Mutex <- 1
-			fmt.Printf("**GET added %v to %v lease list\n", args.LeaseClient, args.Key)
+			// fmt.Printf("**GET added %v to %v lease list\n", args.LeaseClient, args.Key)
 			ss.PrintLeaseMap()
 		} else {
 			keys = []string{}
@@ -484,7 +578,7 @@ func (ss *Storageserver) Get(args *storageproto.GetArgs, reply *storageproto.Get
 			mutex <- 1
 			ss.leaseMap[args.Key] = &LeaseInfo{Mutex: mutex, ClientKeys: &keys}
 			ss.leaseMapM <- 1
-			fmt.Printf("**GET added Lease %v to %v\n", args.LeaseClient, args.Key)
+			// fmt.Printf("**GET added Lease %v to %v\n", args.LeaseClient, args.Key)
 			ss.PrintLeaseMap()
 		}
 
@@ -508,10 +602,23 @@ func (ss *Storageserver) Get(args *storageproto.GetArgs, reply *storageproto.Get
 	}
 	ss.valMapM <- 1
 
+	//fmt.Printf("Get val for key %v: %v\n", args.Key, reply.Value)
+
 	return nil
 }
 
 func (ss *Storageserver) GetList(args *storageproto.GetArgs, reply *storageproto.GetListReply) error {
+
+	//fmt.Println("called getList")
+	//fmt.Printf("key: %v\n", args.Key)
+
+	rightServer := ss.checkServer(args.Key)
+
+	if rightServer == false {
+		reply.Status = storageproto.EWRONGSERVER
+		return nil
+	}
+
 	<- ss.leaseMapM
 	leaseInfo, exists := ss.leaseMap[args.Key]
 	ss.leaseMapM <- 1
@@ -536,7 +643,7 @@ func (ss *Storageserver) GetList(args *storageproto.GetArgs, reply *storageproto
 			<- leaseInfo.Mutex
 			*leaseInfo.ClientKeys = append(*leaseInfo.ClientKeys, args.LeaseClient)
 			leaseInfo.Mutex <- 1
-			fmt.Printf("**GETLIST added %v to %v lease list\n", args.LeaseClient, args.Key)
+			// fmt.Printf("**GETLIST added %v to %v lease list\n", args.LeaseClient, args.Key)
 			ss.PrintLeaseMap()
 		} else {
 			keys := []string{}
@@ -546,7 +653,7 @@ func (ss *Storageserver) GetList(args *storageproto.GetArgs, reply *storageproto
 			mutex <- 1
 			ss.leaseMap[args.Key] = &LeaseInfo{Mutex: mutex, ClientKeys: &keys}
 			ss.leaseMapM <- 1
-			fmt.Printf("**GETLIST added %v to %v lease list\n", args.LeaseClient, args.Key)
+			// fmt.Printf("**GETLIST added %v to %v lease list\n", args.LeaseClient, args.Key)
 			ss.PrintLeaseMap()
 		}
 
@@ -576,6 +683,17 @@ func (ss *Storageserver) GetList(args *storageproto.GetArgs, reply *storageproto
 }
 
 func (ss *Storageserver) Put(args *storageproto.PutArgs, reply *storageproto.PutReply) error {
+	//fmt.Println("called put")
+	//fmt.Printf("key: %v\n", args.Key)
+
+	rightServer := ss.checkServer(args.Key)
+
+	if rightServer == false {
+		//fmt.Println("wrong server Put")
+		reply.Status = storageproto.EWRONGSERVER
+		return nil
+	}
+
 	//if we are changing something that people have leases on we have to invalidate all leases
 	<- ss.leaseMapM
 	_, exists := ss.leaseMap[args.Key]
@@ -587,11 +705,25 @@ func (ss *Storageserver) Put(args *storageproto.PutArgs, reply *storageproto.Put
 	ss.valMap[args.Key] = args.Value
 	ss.valMapM <- 1
 
+	reply.Status = storageproto.OK
+
+	//fmt.Printf("Put value %v for key %v\n", args.Value, args.Key)
+
 	return nil
 }
 
 func (ss *Storageserver) AppendToList(args *storageproto.PutArgs, reply *storageproto.PutReply) error {
 	//fmt.Println("APPEND TO LIST!")
+
+	//fmt.Println("called appendToList")
+	//fmt.Printf("key: %v\n", args.Key)
+
+	rightServer := ss.checkServer(args.Key)
+
+	if rightServer == false {
+		reply.Status = storageproto.EWRONGSERVER
+		return nil
+	}
 
 	//if we are changing something that people have leases on we have to invalidate all leases
 	<- ss.leaseMapM
@@ -624,7 +756,16 @@ func (ss *Storageserver) AppendToList(args *storageproto.PutArgs, reply *storage
 }
 
 func (ss *Storageserver) RemoveFromList(args *storageproto.PutArgs, reply *storageproto.PutReply) error {
-	// //fmt.Println("REMOVE FROM LIST!")
+
+	//fmt.Println("called remove from List")
+	//fmt.Printf("key: %v\n", args.Key)
+
+	rightServer := ss.checkServer(args.Key)
+
+	if rightServer == false {
+		reply.Status = storageproto.EWRONGSERVER
+		return nil
+	}
 
 	//if we are changing something that people have leases on we have to invalidate all leases
 	<- ss.leaseMapM
