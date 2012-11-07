@@ -88,6 +88,9 @@ func (ls *Libstore) ClearCaches(key string) {
 }
 
 func (ls *Libstore) RevokeLease(args *storageproto.RevokeLeaseArgs, reply *storageproto.RevokeLeaseReply) error {
+
+	fmt.Println("called RevokeLease (libstore)")
+
 	ls.ClearCaches(args.Key)
 	reply.Status = storageproto.OK
 	return nil	
@@ -95,6 +98,9 @@ func (ls *Libstore) RevokeLease(args *storageproto.RevokeLeaseArgs, reply *stora
 
 
 func iNewLibstore(server string, myhostport string, flags int) (*Libstore, error) {
+
+	fmt.Println("called new Libstore")
+
 	ls := &Libstore{}
 	ls.flags = flags
 	ls.myhostport = myhostport
@@ -163,6 +169,9 @@ func iNewLibstore(server string, myhostport string, flags int) (*Libstore, error
 }
 
 func (ls *Libstore) getServer(key string) (*rpc.Client, error) {
+
+	fmt.Println("called getServer (libstore)")
+
 	// Use beginning of key to group related keys together
 	precolon := strings.Split(key, ":")[0]
 	keyid := Storehash(precolon)	
@@ -212,6 +221,9 @@ func (ls *Libstore) getServer(key string) (*rpc.Client, error) {
 
 
 func (ls *Libstore) iGet(key string) (string, error) {
+
+	fmt.Println("called Get (libstore)")
+
 	now := time.Now().UnixNano()
 
 	//check if lease is still valid
@@ -283,6 +295,9 @@ func (ls *Libstore) iGet(key string) (string, error) {
 }
 
 func (ls *Libstore) iPut(key, value string) error {
+
+	fmt.Println("called Put (libstore)")
+
 	args := &storageproto.PutArgs{key, value}
 	var reply storageproto.PutReply
 
@@ -305,6 +320,9 @@ func (ls *Libstore) iPut(key, value string) error {
 }
 
 func (ls *Libstore) iGetList(key string) ([]string, error) {
+
+	fmt.Println("called GetList (libstore)")
+
 	now := time.Now().UnixNano()
 
 	//check if lease is still valid
@@ -381,6 +399,9 @@ func (ls *Libstore) iGetList(key string) ([]string, error) {
 
 
 func (ls *Libstore) iRemoveFromList(key, removeitem string) error {
+
+	fmt.Println("called RemoveFromList (libstore)")
+
 	args := &storageproto.PutArgs{key, removeitem}
 	var reply storageproto.PutReply
 
@@ -397,6 +418,9 @@ func (ls *Libstore) iRemoveFromList(key, removeitem string) error {
 }
 
 func (ls *Libstore) iAppendToList(key, newitem string) error {
+
+	fmt.Println("called AppendToList (libstore)")
+
 	args := &storageproto.PutArgs{key, newitem}
 	var reply storageproto.PutReply
 

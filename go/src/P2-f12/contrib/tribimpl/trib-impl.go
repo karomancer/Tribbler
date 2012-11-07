@@ -5,7 +5,7 @@ import (
 	"P2-f12/contrib/libstore"
 	"time"
 	"strconv"
-	// "fmt"
+	"fmt"
 	// "strings"
 	"math"
 	// "errors"
@@ -19,6 +19,9 @@ type Tribserver struct {
 }
 
 func NewTribserver(storagemaster string, myhostport string) *Tribserver {
+
+	fmt.Println("called new tribserver")
+
 	lstore, err := libstore.NewLibstore(storagemaster, myhostport, 0)
 
 	if err != nil { return nil }
@@ -36,6 +39,9 @@ func NewTribserver(storagemaster string, myhostport string) *Tribserver {
 }
 
 func (ts *Tribserver) CreateUser(args *tribproto.CreateUserArgs, reply *tribproto.CreateUserReply) error {
+
+	fmt.Println("called createUser (tribserver)")
+
 	// Set responses by modifying the reply structure, like:
 	// reply.Status = tribproto.EEXISTS
 
@@ -65,6 +71,9 @@ func (ts *Tribserver) CreateUser(args *tribproto.CreateUserArgs, reply *tribprot
 }
 
 func (ts *Tribserver) AddSubscription(args *tribproto.SubscriptionArgs, reply *tribproto.SubscriptionReply) error {
+
+	fmt.Println("called AddSubscription (tribserver)")
+
 	userId := args.Userid
 	targetId := args.Targetuser
 
@@ -103,6 +112,9 @@ func (ts *Tribserver) AddSubscription(args *tribproto.SubscriptionArgs, reply *t
 }
 
 func (ts *Tribserver) RemoveSubscription(args *tribproto.SubscriptionArgs, reply *tribproto.SubscriptionReply) error {
+
+	fmt.Println("called RemoveSubscription (tribserver)")
+
 	userId := args.Userid
 	targetId := args.Targetuser
 
@@ -133,6 +145,8 @@ func (ts *Tribserver) RemoveSubscription(args *tribproto.SubscriptionArgs, reply
 }
 
 func (ts *Tribserver) GetSubscriptions(args *tribproto.GetSubscriptionsArgs, reply *tribproto.GetSubscriptionsReply) error {
+
+	fmt.Println("called GetSubscriptions (tribserver)")
 	
 	//check errors for any calls to libstore
 
@@ -165,6 +179,9 @@ func (ts *Tribserver) GetSubscriptions(args *tribproto.GetSubscriptionsArgs, rep
 }
 
 func (ts *Tribserver) PostTribble(args *tribproto.PostTribbleArgs, reply *tribproto.PostTribbleReply) error {
+
+	fmt.Println("called PostTribble (tribserver)")
+
 	now := time.Now().UnixNano()
 	//Make into Tribble struct.
 	tribble := tribproto.Tribble{Userid: args.Userid, Posted: time.Unix(0, now), Contents: args.Contents}	
@@ -196,6 +213,8 @@ func (ts *Tribserver) PostTribble(args *tribproto.PostTribbleArgs, reply *tribpr
 }	
 
 func (ts *Tribserver) GetTribbles(args *tribproto.GetTribblesArgs, reply *tribproto.GetTribblesReply) error {
+
+	fmt.Println("called GetTribbles (tribserver)")
 	
 	//check errors for any calls to libstore
 
@@ -252,6 +271,8 @@ func (ts *Tribserver) GetTribbles(args *tribproto.GetTribblesArgs, reply *tribpr
 }
 
 func (ts *Tribserver) GetTribblesBySubscription(args *tribproto.GetTribblesArgs, reply *tribproto.GetTribblesReply) error {
+
+	fmt.Println("called GetTribblesBySubscription (tribserver)")
 	
 	//check errors for any calls to libstore
 
