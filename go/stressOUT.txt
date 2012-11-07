@@ -1,1 +1,1 @@
-./stresstest.sh: line 82: kill: (6709) - No such process
+./stresstest.sh: line 82: kill: (15784) - No such process
