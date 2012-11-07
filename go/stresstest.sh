@@ -24,14 +24,14 @@ cd - > /dev/null
 function startStorageServers {
     N=${#STORAGE_ID[@]}
     # Start master storage server
-    ${PROJECT_PATH}/src/P2-f12/official/storageserver/storageserver -N=${N} -id=${STORAGE_ID[0]} -port=${STORAGE_PORT} &> /dev/null &
+    ${PROJECT_PATH}/src/P2-f12/official/storageserver/storageserver -N=${N} -id=${STORAGE_ID[0]} -port=${STORAGE_PORT} &
     STORAGE_SERVER_PID[0]=$!
     # Start slave storage servers
     if [ "$N" -gt 1 ]
     then
         for i in `seq 1 $((N - 1))`
         do
-            ${PROJECT_PATH}/src/P2-f12/official/storageserver/storageserver -id=${STORAGE_ID[$i]} -master="localhost:${STORAGE_PORT}" &> /dev/null &
+            ${PROJECT_PATH}/src/P2-f12/official/storageserver/storageserver -id=${STORAGE_ID[$i]} -master="localhost:${STORAGE_PORT}" &
             STORAGE_SERVER_PID[$i]=$!
         done
     fi
@@ -52,7 +52,7 @@ function startTribServers {
     do
         # Pick random port between [10000, 20000)
         TRIB_PORT[$i]=$(((RANDOM % 10000) + 10000))
-        ${PROJECT_PATH}/src/P2-f12/official/tribserver/tribserver -port=${TRIB_PORT[$i]} "localhost:${STORAGE_PORT}" &> /dev/null &
+        ${PROJECT_PATH}/src/P2-f12/official/tribserver/tribserver -port=${TRIB_PORT[$i]} "localhost:${STORAGE_PORT}" &
         TRIB_SERVER_PID[$i]=$!
     done
     sleep 5

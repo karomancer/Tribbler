@@ -38,6 +38,7 @@ type ClientLease struct {
 
 type LeaseInfo struct {
 	Mutex chan int
+	ValidUntil int64
 	ClientLeases *[]ClientLease
 	ResponseLock chan int
 	Responses *[]int
@@ -57,11 +58,6 @@ type Storageserver struct {
 	//e.g. dga:7492ef010d -> host:port
 	leaseMap map[string]*LeaseInfo //maps key to the clients who hold a lease on that key
 	leaseMapM chan int
-
-	//client@key -> leaseTime
-	//e.g. host:port@dga:7492ef010d -> #nanoseconds
-	clientLeaseMap map[string]int64 //maps from client to timestamp when lease runs out
-	clientLeaseMapM chan int
 
 	blockOnRevoke map[string]chan int //key to a chan that blocks GET and GETLIST while revoking leases
 	blockOnRevokeM chan int
@@ -83,83 +79,39 @@ func reallySeedTheDamnRNG() {
 	rand.Seed( randint.Int64())
 }
 
-func (ss *Storageserver) PrintLeaseMap() {
-	//fmt.Println("**** Lease keys: ")
-	<- ss.leaseMapM
-	stuff := ss.leaseMap
-	ss.leaseMapM <- 1
-	for _, leaseInfo := range stuff {
-		//fmt.Printf("***\t%v:\t", k)
-		<- leaseInfo.Mutex
-		keys := *leaseInfo.ClientLeases
-		leaseInfo.Mutex <- 1 
-		for j:=0; j<len(keys); j++ {
-			//fmt.Printf("%v\t", keys[j])
-		}
-		//fmt.Println()
-	}  
-	//fmt.Println()
-}
-
 func (ss *Storageserver) GarbageCollector() {
 	for {
 		time.Sleep(1*time.Second)
-		<- ss.clientLeaseMapM
-		leases := ss.clientLeaseMap //don't want to be accessing leaseMap in a loop while blocking other processes
-		ss.clientLeaseMapM <- 1
-		for key, timestamp := range leases {
+		<- ss.leaseMapM
+		leases := ss.leaseMap //don't want to be accessing leaseMap in a loop while blocking other processes
+		ss.leaseMapM <- 1
+		for key, leaseInfo := range leases {
 			now := time.Now().UnixNano()
-			if now > timestamp {	
-				ss.ClearCaches(key) 
+			<- leaseInfo.Mutex
+			validUntil := leaseInfo.ValidUntil
+			leaseInfo.Mutex <- 1
+			if now > validUntil {	
+				fmt.Println("Lease for " + key + " expired.")
+				go ss.ClearCaches(key)			
 			}
 		}
 	}
 }
 
-func (ss *Storageserver) ClearCaches(clientKey string) {
-	keystring := strings.Split(clientKey, "@")
-	client := keystring[0]
-	key := keystring[1]
-
-	//delete client's lease from clientmap
-	<- ss.clientLeaseMapM 
-	delete(ss.clientLeaseMap, clientKey)
-	ss.clientLeaseMapM <- 1
-
-	
-
-	//delete client from list of clients in leaseKey map
+func (ss *Storageserver) ClearCaches(key string) {
+	//deleting lease
 	<- ss.leaseMapM
-	leaseInfo, exists := ss.leaseMap[key]
+	_, exists := ss.leaseMap[key]
 	ss.leaseMapM <- 1
 
 	if exists == false { return }
-
-	list := *leaseInfo.ClientLeases
-
-	if len(list) == 1 {
-		<- ss.leaseMapM
-		delete(ss.leaseMap, key)
-		ss.leaseMapM <- 1
-		ss.PrintLeaseMap()
-		return
-	}
-
-	newlist := []ClientLease{}
-	for i:=0; i<len(list); i++ {
-		if list[i].Client != client {
-			newlist = append(newlist, ClientLease{Client: list[i].Client, Response: make(chan int, 1)})
-		} else {
-			<- leaseInfo.ResponseLock
-			list[i].Response <- 1
-			leaseInfo.ResponseLock <- 1
-		}
-	}
-	<- leaseInfo.Mutex
-	*leaseInfo.ClientLeases = newlist
-	leaseInfo.Mutex <- 1
-	ss.PrintLeaseMap()
+	
+	<- ss.leaseMapM
+	delete(ss.leaseMap, key)
+	ss.leaseMapM <- 1
+	fmt.Println("Lease for " + key + " removed from lease map")
 }
+
 
 func NewStorageserver(master string, numnodes int, portnum int, nodeid uint32) *Storageserver {
 
@@ -195,10 +147,6 @@ func NewStorageserver(master string, numnodes int, portnum int, nodeid uint32) *
 	ss.leaseMap = make(map[string]*LeaseInfo)
 	ss.leaseMapM = make(chan int, 1)
 	ss.leaseMapM <- 1
-
-	ss.clientLeaseMap = make(map[string]int64)
-	ss.clientLeaseMapM = make(chan int, 1)
-	ss.clientLeaseMapM <- 1
 
 	ss.listMap = make(map[string][]string)
 	ss.listMapM = make(chan int, 1)
@@ -465,85 +413,78 @@ func (ss *Storageserver) dialAndRPCRevoke(key string, li *LeaseInfo, cl ClientLe
 	var exists bool
 	var err error
 
-	select {
-		case <- cl.Response:
-			//fmt.Println("Received expiration!")
-			<- li.ResponseLock
-			*li.Responses = append(*li.Responses, 1)
-			li.ResponseLock <- 1
-			return
-		default:
-			<- ss.connMapM 
-			cli, exists = ss.connMap[cl.Client]
-			ss.connMapM <- 1
+	<- ss.connMapM 
+	cli, exists = ss.connMap[cl.Client]
+	ss.connMapM <- 1
 
-			if exists == false {
-				cli, err = rpc.DialHTTP("tcp", cl.Client)
-				if err != nil {
-					//fmt.Printf("Could not connect to server %s, returning nil\n", cl.Client)
-					return 
-				}
-				<- ss.connMapM
-				ss.connMap[cl.Client] = cli
-				ss.connMapM <- 1
-			} 
+	if exists == false {
+		cli, err = rpc.DialHTTP("tcp", cl.Client)
+		if err != nil {
+			//fmt.Printf("Could not connect to server %s, returning nil\n", cl.Client)
+			return 
+		}
+		<- ss.connMapM
+		ss.connMap[cl.Client] = cli
+		ss.connMapM <- 1
+	} 
 				
-			<- ss.connMapM 
-			cli, exists = ss.connMap[cl.Client]
-			ss.connMapM <- 1
+	<- ss.connMapM 
+	cli, exists = ss.connMap[cl.Client]
+	ss.connMapM <- 1
 
-			//revoke the lease
-			args := storageproto.RevokeLeaseArgs{Key: key}
-			var reply storageproto.RevokeLeaseReply
-			count := 5
-			status := -1
-			for status != storageproto.OK && count > 0 {
-				err := cli.Call("CacheRPC.RevokeLease", &args, &reply)
-				if err != nil {
-					//fmt.Println("Could not revoke lease")
-					return 
-				}
-				time.Sleep(2*time.Second)
-				status = reply.Status
-				//fmt.Println(reply.Status)
-				count--
-			}
-
-			//fmt.Println(reply.Status)
-
-			clientKey := cl.Client + "@" + key
-			<- ss.clientLeaseMapM
-			delete(ss.clientLeaseMap, clientKey)
-			ss.clientLeaseMapM <- 1
-
-			<- li.ResponseLock
-			*li.Responses = append(*li.Responses, 1)
-			li.ResponseLock <- 1
-
-			return
+	//revoke the lease
+	args := storageproto.RevokeLeaseArgs{Key: key}
+	var reply storageproto.RevokeLeaseReply
+	status := -1
+	<- li.Mutex
+	runUntil := li.ValidUntil
+ 	li.Mutex <- 1
+ 	now := time.Now().UnixNano()
+	for status != storageproto.OK && now <= runUntil {
+		err := cli.Call("CacheRPC.RevokeLease", &args, &reply)
+		if err != nil {
+			fmt.Println("Could not revoke lease.")
+			break 
+		}
+		status = reply.Status
+		now = time.Now().UnixNano()
 	}
+	if now > runUntil {
+		fmt.Println("Lease expired before revokes complete.")
+		return
+	}
+ 
+	<- li.ResponseLock
+	*li.Responses = append(*li.Responses, 1)
+	li.ResponseLock <- 1
 }
 
 func (ss *Storageserver) collectResponses(key string, numclients int, li *LeaseInfo) {
+	fmt.Println("Collect got lock!")
 	<- ss.blockOnRevoke[key]
+	validUntil := li.ValidUntil
 	for {
 		<- li.Mutex
 		responses := *li.Responses
 		li.Mutex <- 1
-		if len(responses) == numclients { 
-			break 
+		//If all revocations completed
+		if len(responses) == numclients { break }
+
+		//If it expired in the mean time
+		now := time.Now().UnixNano()
+		if now >= validUntil { 
+			fmt.Println("Lease expired.")
+			ss.ClearCaches(key)
+			ss.blockOnRevoke[key] <- 1
+			return 
 		}
 		time.Sleep(1*time.Second)
 	}
 
-	<- ss.leaseMapM
-	_, exists := ss.leaseMap[key]
-	if exists == true {	delete(ss.leaseMap, key) }
-	ss.leaseMapM <- 1
+	ss.ClearCaches(key)
+ 	
+	fmt.Println("Revoked Lease.")
 	ss.blockOnRevoke[key] <- 1
-
-	fmt.Println("Got to the end of collectResponses")
-
 }
 
 func (ss *Storageserver) revokeLeases(key string) {
@@ -560,6 +501,7 @@ func (ss *Storageserver) revokeLeases(key string) {
 	leaseList := *leaseInfo.ClientLeases
 	leaseInfo.Mutex <- 1
 
+	fmt.Println("Going to try and revoke lease...")
 	go ss.collectResponses(key, len(leaseList), leaseInfo)
 
 	for i := 0; i < len(leaseList); i++ {
@@ -581,6 +523,7 @@ func (ss *Storageserver) Get(args *storageproto.GetArgs, reply *storageproto.Get
 	ss.blockOnRevokeM <- 1
 
 	if blockExists == true {
+		fmt.Println("Get got lock!")
 		<- ss.blockOnRevoke[args.Key]
 	}
 
@@ -621,7 +564,6 @@ func (ss *Storageserver) Get(args *storageproto.GetArgs, reply *storageproto.Get
 			*leaseInfo.ClientLeases = append(*leaseInfo.ClientLeases, ClientLease{Client: args.LeaseClient, Response: make(chan int, 1)})
 			leaseInfo.Mutex <- 1
 			//fmt.Printf("**GET added %v to %v lease list\n", args.LeaseClient, args.Key)
-			ss.PrintLeaseMap()
 		} else {
 			keys = []ClientLease{}
 			keys = append(keys, ClientLease{Client: args.LeaseClient, Response: make(chan int, 1)})
@@ -630,7 +572,8 @@ func (ss *Storageserver) Get(args *storageproto.GetArgs, reply *storageproto.Get
 			mutex <- 1
 			rlock := make(chan int, 1)
 			rlock <- 1
-			ss.leaseMap[args.Key] = &LeaseInfo{Mutex: mutex, ResponseLock: rlock, ClientLeases: &keys, Responses: &[]int{}}
+			leaseExpiration := time.Now().Add((storageproto.LEASE_SECONDS+storageproto.LEASE_GUARD_SECONDS)*time.Second).UnixNano()
+			ss.leaseMap[args.Key] = &LeaseInfo{Mutex: mutex, ValidUntil: leaseExpiration, ResponseLock: rlock, ClientLeases: &keys, Responses: &[]int{}}
 			ss.leaseMapM <- 1
 
 			//set up block revoke as well
@@ -643,13 +586,8 @@ func (ss *Storageserver) Get(args *storageproto.GetArgs, reply *storageproto.Get
 
 			fmt.Printf("**GET added Lease %v to %v\n", args.LeaseClient, args.Key)
 			//fmt.Printf("**GET added Lease %v to %v\n", args.LeaseClient, args.Key)
-			ss.PrintLeaseMap()
 		}
 
-		<- ss.clientLeaseMapM
-		leaseExpiration := time.Now().Add((storageproto.LEASE_SECONDS+storageproto.LEASE_GUARD_SECONDS)*time.Second).UnixNano()
-		ss.clientLeaseMap[args.LeaseClient + "@" + args.Key] = leaseExpiration
-		ss.clientLeaseMapM <- 1 
 	} else {
 		fmt.Println("Totally doesn't want a lease")
 		reply.Lease.Granted = false
@@ -686,6 +624,7 @@ func (ss *Storageserver) GetList(args *storageproto.GetArgs, reply *storageproto
 	ss.blockOnRevokeM <- 1
 
 	if blockExists == true {
+		fmt.Println("GetList got lock!")
 		<- ss.blockOnRevoke[args.Key]
 	}
 	
@@ -729,7 +668,6 @@ func (ss *Storageserver) GetList(args *storageproto.GetArgs, reply *storageproto
 			*leaseInfo.ClientLeases = append(*leaseInfo.ClientLeases, ClientLease{Client: args.LeaseClient, Response: make(chan int, 1)})
 			leaseInfo.Mutex <- 1
 			fmt.Printf("**GETLIST added %v to %v lease list\n", args.LeaseClient, args.Key)
-			ss.PrintLeaseMap()
 		} else {
 			keys := []ClientLease{}
 			keys = append(keys, ClientLease{Client: args.LeaseClient, Response: make(chan int, 1)})
@@ -738,7 +676,8 @@ func (ss *Storageserver) GetList(args *storageproto.GetArgs, reply *storageproto
 			mutex <- 1
 			rlock := make(chan int, 1)
 			rlock <- 1
-			ss.leaseMap[args.Key] = &LeaseInfo{Mutex: mutex, ResponseLock: rlock, ClientLeases: &keys, Responses: &[]int{}}
+			leaseExpiration := time.Now().Add((storageproto.LEASE_SECONDS+storageproto.LEASE_GUARD_SECONDS)*time.Second).UnixNano()
+			ss.leaseMap[args.Key] = &LeaseInfo{Mutex: mutex, ValidUntil: leaseExpiration, ResponseLock: rlock, ClientLeases: &keys, Responses: &[]int{}}
 			ss.leaseMapM <- 1
 
 			if blockExists == false {
@@ -749,13 +688,7 @@ func (ss *Storageserver) GetList(args *storageproto.GetArgs, reply *storageproto
 			}
 
 			// fmt.Printf("**GETLIST added %v to %v lease list\n", args.LeaseClient, args.Key)
-			ss.PrintLeaseMap()
 		}
-
-		<- ss.clientLeaseMapM
-		leaseExpiration := time.Now().Add((storageproto.LEASE_SECONDS+storageproto.LEASE_GUARD_SECONDS)*time.Second).UnixNano()
-		ss.clientLeaseMap[args.LeaseClient + "@" + args.Key] = leaseExpiration
-		ss.clientLeaseMapM <- 1
 
 	} else {
 		reply.Lease.Granted = false
@@ -796,6 +729,7 @@ func (ss *Storageserver) Put(args *storageproto.PutArgs, reply *storageproto.Put
 	ss.blockOnRevokeM <- 1
 
 	if blockExists == true {
+		fmt.Println("Put got lock!")
 		<- ss.blockOnRevoke[args.Key]
 	}
 
@@ -834,6 +768,7 @@ func (ss *Storageserver) AppendToList(args *storageproto.PutArgs, reply *storage
 	ss.blockOnRevokeM <- 1
 
 	if blockExists == true {
+		fmt.Println("Append got lock!")
 		<- ss.blockOnRevoke[args.Key]
 	}
 
@@ -889,6 +824,7 @@ func (ss *Storageserver) RemoveFromList(args *storageproto.PutArgs, reply *stora
 	ss.blockOnRevokeM <- 1
 
 	if blockExists == true {
+		fmt.Println("RemoveFromListgot lock!")
 		<- ss.blockOnRevoke[args.Key]
 	}
 

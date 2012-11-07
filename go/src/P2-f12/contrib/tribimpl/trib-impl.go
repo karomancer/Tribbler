@@ -5,10 +5,8 @@ import (
 	"P2-f12/contrib/libstore"
 	"time"
 	"strconv"
-	// "fmt"
-	// "strings"
+	"fmt"
 	"math"
-	// "errors"
 	"encoding/json"
 )
 
@@ -22,20 +20,11 @@ func NewTribserver(storagemaster string, myhostport string) *Tribserver {
 	lstore, err := libstore.NewLibstore(storagemaster, myhostport, 0)
 
 	if err != nil { return nil }
-
-	//pass storagemaster and hostport to new libstore with flags for debugging
-	//make new libstore
-
-	//store other shits
-
-	//make tribserver
-
-	//return the thing
-
 	return &Tribserver{storagemaster: storagemaster, hostport: myhostport, lstore: lstore}
 }
 
 func (ts *Tribserver) CreateUser(args *tribproto.CreateUserArgs, reply *tribproto.CreateUserReply) error {
+	fmt.Println("Start create user...")
 	// Set responses by modifying the reply structure, like:
 	// reply.Status = tribproto.EEXISTS
 
@@ -47,8 +36,10 @@ func (ts *Tribserver) CreateUser(args *tribproto.CreateUserArgs, reply *tribprot
 	if exists != nil {
 		err1 := ts.lstore.Put(args.Userid, "0")
 		if err1 != nil {
+			fmt.Println("Put super fail.")
 			return err1
 		}
+		fmt.Println("Created user " + args.Userid)
 		//then set reply to OK
 		reply.Status = tribproto.OK
 		return nil
@@ -57,14 +48,12 @@ func (ts *Tribserver) CreateUser(args *tribproto.CreateUserArgs, reply *tribprot
 	//else, the user already exists and we can't create 
 	//set reply to EEXISTS
 	reply.Status = tribproto.EEXISTS
-	//return nil
-	return nil
-
-	
+	return nil	
 	
 }
 
 func (ts *Tribserver) AddSubscription(args *tribproto.SubscriptionArgs, reply *tribproto.SubscriptionReply) error {
+	fmt.Println("Start add subscriptions...")
 	userId := args.Userid
 	targetId := args.Targetuser
 
@@ -75,11 +64,18 @@ func (ts *Tribserver) AddSubscription(args *tribproto.SubscriptionArgs, reply *t
 	//if userErr != nil, then user doesn't exist
 	if userErr != nil { 
 		reply.Status = tribproto.ENOSUCHUSER
+		fmt.Println("No such user!")
 		return nil 
 	}
 	if targetErr != nil { 
 		reply.Status = tribproto.ENOSUCHTARGETUSER
+		fmt.Println("No such target!")
 		return nil 
+	}
+	if userErr == targetErr {
+		fmt.Println("You can't subscribe to yourself!")
+		reply.Status = tribproto.OK
+		return nil
 	}
 
 	subs, subErr := ts.lstore.GetList(args.Userid + ":subscriptions")
@@ -98,13 +94,22 @@ func (ts *Tribserver) AddSubscription(args *tribproto.SubscriptionArgs, reply *t
 	//return nil
 	appendErr := ts.lstore.AppendToList(userId + ":subscriptions", targetId)
 	if appendErr != nil { return appendErr }
+	fmt.Println("Added " + targetId + " to user " + userId + " subscriptions!")
+
 	reply.Status = tribproto.OK
 	return nil
 }
 
 func (ts *Tribserver) RemoveSubscription(args *tribproto.SubscriptionArgs, reply *tribproto.SubscriptionReply) error {
+	fmt.Println("Start remove subscriptions...")
 	userId := args.Userid
 	targetId := args.Targetuser
+
+	if userId == targetId {
+		fmt.Println("You can't remove yourself from your own subscriptions!")
+		reply.Status = tribproto.OK
+		return nil
+	}
 
 	//check errors for any calls to libstore
 	_, userErr := ts.lstore.Get(userId)
@@ -125,20 +130,25 @@ func (ts *Tribserver) RemoveSubscription(args *tribproto.SubscriptionArgs, reply
 	//return nil
 	removeErr := ts.lstore.RemoveFromList(userId + ":subscriptions", targetId)
 	if removeErr != nil { 
+		fmt.Println("Remove error!")
 		reply.Status = tribproto.ENOSUCHTARGETUSER
 		return nil 
 	}
+	fmt.Println("Removed " + targetId + " from user " + userId + " subscriptions!")
+
 	reply.Status = tribproto.OK
 	return nil
 }
 
 func (ts *Tribserver) GetSubscriptions(args *tribproto.GetSubscriptionsArgs, reply *tribproto.GetSubscriptionsReply) error {
+	fmt.Println("Start get subscriptions...")
 	
 	//check errors for any calls to libstore
 
 
 	//check if subscriber exists
 	_, userErr := ts.lstore.Get(args.Userid)
+		fmt.Println("Succeeded from libstore GET")
 
 	if userErr != nil {
 		reply.Status = tribproto.ENOSUCHUSER
@@ -147,17 +157,28 @@ func (ts *Tribserver) GetSubscriptions(args *tribproto.GetSubscriptionsArgs, rep
 	
 	//otherwise...
 	//then do getList (user:subscriptions)
+	//err indicates that there is no list yet, which means there are no subscriptions
 	subs, err1 := ts.lstore.GetList(args.Userid + ":subscriptions")
 
 	if err1 != nil {
-		return err1
+		reply.Userids = []string{}
+		fmt.Println("User " + args.Userid + " is not subscribed to anyone!")
+		return nil
 	}
+
 	//if there's no list, return an empty list
 	if subs == nil {
 		reply.Userids = []string{}
 	} else {
 		reply.Userids = subs
 	}
+
+	fmt.Println("User " + args.Userid + "'s subscriptions:\n***" )
+	for i:=0; i<len(reply.Userids); i++ {
+		fmt.Printf("%v\t", reply.Userids[i])
+	}
+	fmt.Println("")
+
 	//then reply = OK, list
 	reply.Status = tribproto.OK
 	//return nil
@@ -165,6 +186,7 @@ func (ts *Tribserver) GetSubscriptions(args *tribproto.GetSubscriptionsArgs, rep
 }
 
 func (ts *Tribserver) PostTribble(args *tribproto.PostTribbleArgs, reply *tribproto.PostTribbleReply) error {
+	fmt.Println("Attempting to post tribble...")
 	now := time.Now().UnixNano()
 	//Make into Tribble struct.
 	tribble := tribproto.Tribble{Userid: args.Userid, Posted: time.Unix(0, now), Contents: args.Contents}	
@@ -191,20 +213,23 @@ func (ts *Tribserver) PostTribble(args *tribproto.PostTribbleArgs, reply *tribpr
 	ts.lstore.Put(args.Userid, tribbleId) //mostly for checking for existance for other functions
 	ts.lstore.Put(args.Userid + ":" + tribbleId, string(tribbleJSON)) 
 	ts.lstore.AppendToList(args.Userid + ":timestamps", tribbleId)
+	fmt.Println("User " + args.Userid + " posted " + args.Contents)
 	reply.Status = tribproto.OK
 	return nil
 }	
 
 func (ts *Tribserver) GetTribbles(args *tribproto.GetTribblesArgs, reply *tribproto.GetTribblesReply) error {
-	
+	fmt.Println("Attempting to get tribbles...")
 	//check errors for any calls to libstore
 
 	//check if user exists
 	_, userErr := ts.lstore.Get(args.Userid)
+	fmt.Println("Succeeded from libstore GET")
 
 	if userErr != nil {
 		reply.Status = tribproto.ENOSUCHUSER
 		reply.Tribbles = nil
+		fmt.Println("No such user!")
 		return nil
 	}
 	
@@ -216,6 +241,7 @@ func (ts *Tribserver) GetTribbles(args *tribproto.GetTribblesArgs, reply *tribpr
 	if listErr != nil {
 		reply.Status = tribproto.OK
 		reply.Tribbles = []tribproto.Tribble{}
+		fmt.Println("User " + args.Userid + " has no tribbles!")
 		return nil
 	}
   //for 100 tribbles (or up to 100 tribbles) at end of array (newest pushed to end) 
@@ -227,7 +253,9 @@ func (ts *Tribserver) GetTribbles(args *tribproto.GetTribblesArgs, reply *tribpr
   count := numTribs
   for i = len(timestamps) - 1; count > 0; i-- {
   	jtrib, err2 := ts.lstore.Get(args.Userid + ":" + timestamps[i])
+ 		
  		if err2 != nil {
+ 			fmt.Println("Fail on Get with " + timestamps[i])
  			return err2
  		}
 
@@ -235,9 +263,7 @@ func (ts *Tribserver) GetTribbles(args *tribproto.GetTribblesArgs, reply *tribpr
  		jtribBytes := []byte(jtrib)
  		jerr := json.Unmarshal(jtribBytes, &trib)
 
- 		if jerr != nil {
- 		 	return jerr
- 		}
+ 		if jerr != nil {return jerr }
 
  		
  		tribbles = append(tribbles, trib)
@@ -245,14 +271,20 @@ func (ts *Tribserver) GetTribbles(args *tribproto.GetTribblesArgs, reply *tribpr
  	}
 
  	//reply = OK, tribbles array
+
+	fmt.Println("User " + args.Userid + "'s tribbles:\n***" )
+	for i:=0; i<len(tribbles); i++ {
+		fmt.Printf("%v\t", tribbles[i])
+	}
+	fmt.Println("")
+
  	reply.Status = tribproto.OK
  	reply.Tribbles = tribbles
- 	//return nil
 	return nil
 }
 
 func (ts *Tribserver) GetTribblesBySubscription(args *tribproto.GetTribblesArgs, reply *tribproto.GetTribblesReply) error {
-	
+	fmt.Println("Attempting to get tribbles by subscription")
 	//check errors for any calls to libstore
 
 	//check if user exists
@@ -260,6 +292,7 @@ func (ts *Tribserver) GetTribblesBySubscription(args *tribproto.GetTribblesArgs,
 
 	if userErr != nil {
 		reply.Status = tribproto.ENOSUCHUSER
+		fmt.Println("There is no user.")
 		return nil	
 	}
 	
@@ -270,6 +303,7 @@ func (ts *Tribserver) GetTribblesBySubscription(args *tribproto.GetTribblesArgs,
 	if suberr != nil {
 		reply.Status = tribproto.OK
 		reply.Tribbles = []tribproto.Tribble{}	
+		fmt.Println("User " + args.Userid + " is not subscribed to anyone!")
 		return nil
 	}
 
@@ -331,6 +365,12 @@ func (ts *Tribserver) GetTribblesBySubscription(args *tribproto.GetTribblesArgs,
 		usrTimestamps[id] = newArray
 
 	}
+
+	fmt.Println("User " + args.Userid + "'s subscription tribbles:\n***" )
+	for i:=0; i<len(replyTribs); i++ {
+		fmt.Printf("%v\t", replyTribs[i])
+	}
+	fmt.Println("")
 
 	reply.Status = tribproto.OK
 	reply.Tribbles = replyTribs

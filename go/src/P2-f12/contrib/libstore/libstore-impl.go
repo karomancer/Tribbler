@@ -305,6 +305,7 @@ func (ls *Libstore) iPut(key, value string) error {
 }
 
 func (ls *Libstore) iGetList(key string) ([]string, error) {
+	fmt.Println("***** Gets to GetList")
 	now := time.Now().UnixNano()
 
 	//check if lease is still valid
@@ -376,6 +377,7 @@ func (ls *Libstore) iGetList(key string) ([]string, error) {
 		ls.getListM <- 1
 	}
 
+	fmt.Println("***Libstore Getlist returns allright!")
 	return reply.Value, nil
 }
 
