@@ -65,7 +65,7 @@ type Storageserver struct {
 	clientLeaseMap map[string]int64 //maps from client to timestamp when lease runs out
 	clientLeaseMapM chan int
 
-	stopRevoke chan string
+	leaseMapChan chan map[string]int64
 
 	connMap map[string]*rpc.Client
 	connMapM chan int
@@ -102,18 +102,41 @@ func (ss *Storageserver) PrintLeaseMap() {
 	fmt.Println()
 }
 
-func (ss *Storageserver) GarbageCollector() {
-	time.Sleep((storageproto.LEASE_SECONDS)*time.Second)
+
+func (ss *Storageserver) GarbageCollectorH() {
 	for {
+		time.Sleep((storageproto.LEASE_SECONDS)*time.Second)
 		<- ss.clientLeaseMapM
 		leases := ss.clientLeaseMap //don't want to be accessing leaseMap in a loop while blocking other processes
 		ss.clientLeaseMapM <- 1
-		for key, timestamp := range leases {
-			now := time.Now().UnixNano()
-			if now > timestamp {	
-				ss.ClearCaches(key) 
+		ss.leaseMapChan <- leases		
+	}
+}
+
+func (ss *Storageserver) GarbageCollector() {
+	time.Sleep((storageproto.LEASE_SECONDS)*time.Second)
+	
+	go ss.GarbageCollectorH()
+
+	<- ss.clientLeaseMapM
+	leases := ss.clientLeaseMap //don't want to be accessing leaseMap in a loop while blocking other processes
+	ss.clientLeaseMapM <- 1
+
+	for {
+		fmt.Println("start select statement")
+		select {
+			case updatedLeaseMap := <- ss.leaseMapChan:
+				leases = updatedLeaseMap
+			default:
+				now := time.Now().UnixNano()
+				for key, timestamp := range leases {
+				if now >= timestamp {	
+					ss.ClearCaches(key)
+					fmt.Println("Returned from clear caches") 
+				}
 			}
 		}
+		fmt.Println("end select statement")
 	}
 }
 
@@ -204,7 +227,7 @@ func NewStorageserver(master string, numnodes int, portnum int, nodeid uint32) *
 	ss.clientLeaseMapM = make(chan int, 1)
 	ss.clientLeaseMapM <- 1
 
-	ss.stopRevoke = make(chan string, 1)
+	ss.leaseMapChan = make(chan map[string]int64, 1)
 
 	ss.listMap = make(map[string][]string)
 	ss.listMapM = make(chan int, 1)
