@@ -31,7 +31,7 @@ function startStorageServers {
     then
         for i in `seq 1 $((N - 1))`
         do
-            ${PROJECT_PATH}/src/P2-f12/official/storageserver/storageserver -id=${STORAGE_ID[$i]} -master="localhost:${STORAGE_PORT}" &> /dev/null &
+            ${PROJECT_PATH}/src/P2-f12/official/storageserver/storageserver -id=${STORAGE_ID[$i]} -master="localhost:${STORAGE_PORT}" &> ssOUT.txt &
             STORAGE_SERVER_PID[$i]=$!
         done
     fi
@@ -52,7 +52,7 @@ function startTribServers {
     do
         # Pick random port between [10000, 20000)
         TRIB_PORT[$i]=$(((RANDOM % 10000) + 10000))
-        ${PROJECT_PATH}/src/P2-f12/official/tribserver/tribserver -port=${TRIB_PORT[$i]} "localhost:${STORAGE_PORT}" &> /dev/null &
+        ${PROJECT_PATH}/src/P2-f12/official/tribserver/tribserver -port=${TRIB_PORT[$i]} "localhost:${STORAGE_PORT}" &> tsOUT.txt &
         TRIB_SERVER_PID[$i]=$!
     done
     sleep 5
@@ -79,7 +79,7 @@ function testStress {
             ${PROJECT_PATH}/src/P2-f12/official/stressclient/stressclient -port=${TRIB_PORT[$((C % M))]} -clientId=${CLIENT} ${USER} ${K} & 
             STRESS_CLIENT_PID[$C]=$!
             # Setup background thread to kill client upon timeout
-            sleep ${TIMEOUT} && kill -9 ${STRESS_CLIENT_PID[$C]} &> /dev/null &
+            sleep ${TIMEOUT} && kill -9 ${STRESS_CLIENT_PID[$C]} &> stressOUT.txt &
             C=$((C + 1))
         done
     done
